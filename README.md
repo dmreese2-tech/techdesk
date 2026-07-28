@@ -36,9 +36,11 @@ npm run preview
 
 ## Notes on data
 
-There is no backend. All data (shows, rosters, inventory, the uploaded script, etc.) lives in React state, seeded from realistic sample data on load, and resets on page refresh. Settings → Data has a one-click reset back to the sample board.
+There is no backend or account system. All data (shows, rosters, inventory, the uploaded script, etc.) lives in the browser and autosaves to **IndexedDB** as you work — it survives closing the tab or restarting the browser, but it's local to that one browser on that one device: nothing syncs across devices, and clearing site data / browsing data for this app clears it too. Settings shows when it last saved, and has a one-click reset back to the sample board (which also overwrites what's saved).
 
-The Script section is the one part of the app that talks to the outside world at all — it reads a PDF you choose locally and lets you download an annotated copy. Nothing is uploaded anywhere.
+First visit (or any browser/context where IndexedDB is unavailable, e.g. some private-browsing modes) falls back to the built-in sample data with a note in Settings that changes won't persist.
+
+The Script section is the one part of the app that touches a file outside its own state at all — it reads a PDF you choose locally and lets you download an annotated copy. Nothing is uploaded anywhere.
 
 ## Stack
 

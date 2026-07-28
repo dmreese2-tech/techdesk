@@ -5,11 +5,104 @@ import { LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, V
 // pdfjs-dist renders the uploaded script to a canvas so cues can be placed
 // with real pixel coordinates; pdf-lib writes those placements into a new
 // PDF for export. Both run entirely client-side — nothing is uploaded
-// anywhere, and nothing here persists across a page reload, same as the
-// rest of this app's in-memory data.
+// anywhere. Session data (everything below) is now persisted locally in
+// this browser via IndexedDB — see the PERSISTENCE section.
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+
+// ---------------------------------------------------------------------------
+// PERSISTENCE — everything a TD enters needs to survive closing the tab.
+// IndexedDB (not localStorage) because: (1) an uploaded script PDF can run
+// several MB as base64, well past localStorage's ~5-10MB quota, and
+// (2) IndexedDB writes don't block the main thread. This is per-browser,
+// local-only storage — there's no account and nothing syncs across devices.
+//
+// One real complication: six pieces of state (departments, cast types,
+// staff areas, band sections, inventory categories, cue departments) store
+// a lucide-react ICON COMPONENT as part of each entry, and a React
+// component reference can't be JSON-serialized — it would silently vanish
+// on save. So those six are serialized as label-only maps, and rehydrated
+// by re-attaching each entry's original icon (for the built-in categories)
+// or a taxonomy-appropriate fallback icon (for anything the user added
+// later) — the same fallback TaxonomyEditor already uses when creating a
+// new entry, so behavior doesn't change, only where the icon comes from.
+//
+// The uploaded script's PDF bytes are also split into their own IndexedDB
+// key, separate from the rest of the app state, so routine edits elsewhere
+// (renaming a crew member, moving a cue) don't re-serialize a multi-MB
+// blob on every autosave.
+// ---------------------------------------------------------------------------
+const IDB_NAME = 'techdesk-db';
+const IDB_STORE = 'kv';
+const IDB_VERSION = 1;
+const AUTOSAVE_DEBOUNCE_MS = 600;
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error('IndexedDB is not available in this browser/context.'));
+      return;
+    }
+    const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+        req.result.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, value) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// Icon-bearing taxonomy <-> plain-JSON conversion.
+function serializeTaxonomy(map) {
+  return Object.fromEntries(Object.entries(map).map(([key, entry]) => [key, entry.label]));
+}
+function deserializeTaxonomy(initialMap, fallbackIcon, labelMap) {
+  const result = {};
+  Object.entries(labelMap || {}).forEach(([key, label]) => {
+    result[key] = { label, icon: (initialMap[key] && initialMap[key].icon) || fallbackIcon };
+  });
+  return result;
+}
+
+// Script bytes are large and change far less often than everything else —
+// keep them out of the main autosave payload entirely.
+function splitScriptsForSave(shows) {
+  const scripts = {};
+  const lightShows = shows.map((s) => {
+    if (!s.script) return s;
+    scripts[s.id] = s.script;
+    return { ...s, script: { fileName: s.script.fileName, pageCount: s.script.pageCount, markers: s.script.markers, pdfBytes: null } };
+  });
+  return { lightShows, scripts };
+}
+function mergeScriptsOnLoad(lightShows, scripts) {
+  return (lightShows || []).map((s) => {
+    if (!s.script) return s;
+    const full = scripts && scripts[s.id];
+    return full ? { ...s, script: full } : s;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // DESIGN TOKENS
@@ -4169,6 +4262,7 @@ function SettingsModule({
   MUSIC_SECTIONS, setMUSIC_SECTIONS, MUSIC_SECTION_ORDER, setMUSIC_SECTION_ORDER,
   INVENTORY_CATEGORIES, setINVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER, setINVENTORY_CATEGORY_ORDER,
   CUE_DEPTS, setCUE_DEPTS, CUE_DEPT_ORDER, setCUE_DEPT_ORDER,
+  lastSavedAt, persistenceError,
 }) {
   const [newVenue, setNewVenue] = useState('');
   const [newLocation, setNewLocation] = useState('');
@@ -4501,6 +4595,23 @@ function SettingsModule({
             defaultIcon={ClipboardList}
           />
         </div>
+      </div>
+
+      {/* Persistence */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Check size={14} color={persistenceError ? COLOR.amber : COLOR.green} strokeWidth={1.75} />
+          <span className="td-display" style={sectionTitle}>Saving</span>
+        </div>
+        {persistenceError ? (
+          <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>
+            This browser couldn't save changes locally (private browsing and some browser settings block this). Everything still works, but it won't be here after you close the tab.
+          </div>
+        ) : (
+          <div className="td-body" style={sectionNote}>
+            Changes save automatically to this browser as you work{lastSavedAt ? ` — last saved ${lastSavedAt.toLocaleTimeString()}` : ''}. This is local to this browser only: it doesn't sync to another device, and clearing browser data clears it too.
+          </div>
+        )}
       </div>
 
       {/* Data */}
@@ -8659,6 +8770,93 @@ export default function TechDeskDashboard() {
   const [cueDeptOrder, setCueDeptOrder] = useState(Object.keys(INITIAL_CUE_DEPTS));
   const [currentShowId, setCurrentShowId] = useState(null);
 
+  const [hydrated, setHydrated] = useState(false);
+  const [persistenceError, setPersistenceError] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+
+  // Load whatever was saved last time, once, on mount. If nothing's there
+  // yet (first visit) or IndexedDB isn't available at all, just proceed
+  // with the seed data already sitting in state above.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [appState, scripts] = await Promise.all([idbGet('appState'), idbGet('scripts')]);
+        if (!cancelled && appState) {
+          setShows(mergeScriptsOnLoad(appState.shows, scripts));
+          setCrew(appState.crew || seedCrew);
+          setActors(appState.actors || seedActors);
+          setStaff(appState.staff || seedStaff);
+          setMusicians(appState.musicians || seedMusicians);
+          setCalls(appState.calls || seedCalls);
+          setInventory(appState.inventory || seedInventory);
+          setCueSheets(appState.cueSheets || seedCueSheets);
+          setVenues(appState.venues || seedVenues);
+          setLocations(appState.locations || seedLocations);
+          setInstruments(appState.instruments || seedInstruments);
+          setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, appState.departments));
+          setDepartmentOrder(appState.departmentOrder || INITIAL_DEPARTMENT_ORDER);
+          setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, appState.castTypes));
+          setCastTypeOrder(appState.castTypeOrder || INITIAL_CAST_TYPE_ORDER);
+          setStaffAreas(deserializeTaxonomy(INITIAL_STAFF_AREAS, Briefcase, appState.staffAreas));
+          setStaffAreaOrder(appState.staffAreaOrder || INITIAL_STAFF_AREA_ORDER);
+          setMusicSections(deserializeTaxonomy(INITIAL_MUSIC_SECTIONS, Music, appState.musicSections));
+          setMusicSectionOrder(appState.musicSectionOrder || INITIAL_MUSIC_SECTION_ORDER);
+          setInventoryCategories(deserializeTaxonomy(INITIAL_INVENTORY_CATEGORIES, Boxes, appState.inventoryCategories));
+          setInventoryCategoryOrder(appState.inventoryCategoryOrder || INITIAL_INVENTORY_CATEGORY_ORDER);
+          setCueDepts(deserializeTaxonomy(INITIAL_CUE_DEPTS, ClipboardList, appState.cueDepts));
+          setCueDeptOrder(appState.cueDeptOrder || Object.keys(INITIAL_CUE_DEPTS));
+          setCurrentShowId(appState.currentShowId ?? null);
+          setCurrentUserId(appState.currentUserId ?? null);
+          setCurrentActorId(appState.currentActorId ?? null);
+          setCurrentStaffId(appState.currentStaffId ?? null);
+          setCurrentMusicianId(appState.currentMusicianId ?? null);
+        }
+      } catch (err) {
+        if (!cancelled) setPersistenceError(true);
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Autosave — debounced so a burst of typing doesn't trigger a write per
+  // keystroke, gated on `hydrated` so the initial seed data (which is only
+  // a placeholder until the load above finishes) never overwrites what was
+  // actually saved last session.
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    const timeout = setTimeout(() => {
+      const { lightShows, scripts } = splitScriptsForSave(shows);
+      const appState = {
+        shows: lightShows,
+        crew, actors, staff, musicians, calls, inventory, cueSheets,
+        venues, locations, instruments,
+        departments: serializeTaxonomy(departments), departmentOrder,
+        castTypes: serializeTaxonomy(castTypes), castTypeOrder,
+        staffAreas: serializeTaxonomy(staffAreas), staffAreaOrder,
+        musicSections: serializeTaxonomy(musicSections), musicSectionOrder,
+        inventoryCategories: serializeTaxonomy(inventoryCategories), inventoryCategoryOrder,
+        cueDepts: serializeTaxonomy(cueDepts), cueDeptOrder,
+        currentShowId, currentUserId, currentActorId, currentStaffId, currentMusicianId,
+      };
+      Promise.all([idbSet('appState', appState), idbSet('scripts', scripts)])
+        .then(() => setLastSavedAt(new Date()))
+        .catch(() => setPersistenceError(true));
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [
+    hydrated, shows, crew, actors, staff, musicians, calls, inventory, cueSheets,
+    venues, locations, instruments,
+    departments, departmentOrder, castTypes, castTypeOrder, staffAreas, staffAreaOrder,
+    musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
+    currentShowId, currentUserId, currentActorId, currentStaffId, currentMusicianId,
+  ]);
+
   function resetAllData() {
     setShows(seedShows);
     setCrew(seedCrew);
@@ -8817,6 +9015,17 @@ export default function TechDeskDashboard() {
     settings: { eyebrow: 'SHOP SETTINGS', title: 'Board Configuration' },
   };
   const header = headerConfig[active] || headerConfig.dashboard;
+
+  if (!hydrated) {
+    return (
+      <div style={{ minHeight: '100vh', background: COLOR.void, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {FONTS}
+        <div className="td-mono" style={{ fontSize: 11, color: COLOR.textFaint, letterSpacing: '0.08em' }}>
+          LOADING SAVED DATA…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: COLOR.void }}>
@@ -9047,6 +9256,8 @@ export default function TechDeskDashboard() {
             setCUE_DEPTS={setCueDepts}
             CUE_DEPT_ORDER={cueDeptOrder}
             setCUE_DEPT_ORDER={setCueDeptOrder}
+            lastSavedAt={lastSavedAt}
+            persistenceError={persistenceError}
           />
         )}
       </div>
