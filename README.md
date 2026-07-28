@@ -22,25 +22,33 @@ On load, pick a show from the Dashboard (or work with no show selected to manage
 
 ## Getting started
 
-```bash
-npm install
-npm run dev
-```
+This is now a real multi-user tool backed by Supabase — every signed-in member of your company shares the same production data, isolated per company via row-level security.
 
-Then open the printed local URL. For a production build:
+1. **Create a Supabase project** at [supabase.com](https://supabase.com).
+2. **Run the schema**: open the SQL editor in your project and run `supabase/schema.sql` from this repo. It creates every table, row-level security policy, and the private Storage bucket used for uploaded scripts.
+3. **Copy your project's API values**: Project Settings → API, then:
+   ```bash
+   cp .env.example .env.local
+   # fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+   ```
+4. Install and run:
+   ```bash
+   npm install
+   npm run dev
+   ```
+5. Create an account, then create your company (or join an existing one with its company ID, found in Settings → Company).
 
-```bash
-npm run build
-npm run preview
-```
+For a production build: `npm run build` then `npm run preview`, or deploy the `dist/` folder to any static host (Netlify and Cloudflare Pages both allow commercial use on their free tiers; Vercel's free tier is personal-use-only).
 
 ## Notes on data
 
-There is no backend or account system. All data (shows, rosters, inventory, the uploaded script, etc.) lives in the browser and autosaves to **IndexedDB** as you work — it survives closing the tab or restarting the browser, but it's local to that one browser on that one device: nothing syncs across devices, and clearing site data / browsing data for this app clears it too. Settings shows when it last saved, and has a one-click reset back to the sample board (which also overwrites what's saved).
+Shared production data (shows, rosters, calls, inventory, cue sheets, taxonomies) lives in Supabase Postgres, scoped to your company by row-level security — verified by standing up a real local Postgres instance and confirming a simulated second company genuinely cannot read or write the first company's data, in either direction. Uploaded scripts are stored as files in Supabase Storage, not embedded in the database.
 
-First visit (or any browser/context where IndexedDB is unavailable, e.g. some private-browsing modes) falls back to the built-in sample data with a note in Settings that changes won't persist.
+Multi-device sync is deliberately simple: when anyone changes shared data, everyone else's screen refetches and replaces its local copy — there's no field-level merge, so two people editing the exact same record at the exact same moment will have the later save win, same as most small-team tools.
 
-The Script section is the one part of the app that touches a file outside its own state at all — it reads a PDF you choose locally and lets you download an annotated copy. Nothing is uploaded anywhere.
+A few things that are per-device, not shared, and stay in the browser's IndexedDB: which show you're currently looking at, and which identity (crew/cast/staff/band member) you're signed in as for the callboard. Those describe what *this device* is doing, not company data, so they don't sync.
+
+**Before relying on this daily:** if you're on Supabase's free tier, note that free projects auto-pause after 7 days with no API traffic — a real consideration for a tool that goes quiet during dark weeks between productions. The paid tier removes that pause and adds backups. Also worth knowing: the JavaScript side of this integration (the persistence layer, auth flow, and realtime subscriptions) has been carefully written and the database schema has been verified against a real Postgres instance, but the app has not been exercised end-to-end against a live Supabase project — test the full signup → create company → add a show → sign in from a second browser flow yourself before trusting it with real production data.
 
 ## Stack
 

@@ -10,28 +10,40 @@ import { LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, V
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+import {
+  loadOrgData, saveShows, deleteShows, savePeople, deletePeople, saveCalls, deleteCalls,
+  saveInventory, deleteInventory, saveCueSheetForShow, saveSettings, subscribeToOrgChanges,
+  uploadScriptPdf, downloadScriptPdf, deleteScriptPdf,
+} from './persistence.js';
+import { supabase } from './supabaseClient.js';
 
 // ---------------------------------------------------------------------------
-// PERSISTENCE — everything a TD enters needs to survive closing the tab.
-// IndexedDB (not localStorage) because: (1) an uploaded script PDF can run
-// several MB as base64, well past localStorage's ~5-10MB quota, and
-// (2) IndexedDB writes don't block the main thread. This is per-browser,
-// local-only storage — there's no account and nothing syncs across devices.
+// PERSISTENCE — two stores, doing two different jobs.
 //
-// One real complication: six pieces of state (departments, cast types,
-// staff areas, band sections, inventory categories, cue departments) store
-// a lucide-react ICON COMPONENT as part of each entry, and a React
-// component reference can't be JSON-serialized — it would silently vanish
-// on save. So those six are serialized as label-only maps, and rehydrated
-// by re-attaching each entry's original icon (for the built-in categories)
-// or a taxonomy-appropriate fallback icon (for anything the user added
-// later) — the same fallback TaxonomyEditor already uses when creating a
-// new entry, so behavior doesn't change, only where the icon comes from.
+// Shared production data (shows, rosters, calls, inventory, cue sheets,
+// settings) lives in Supabase — a real Postgres database, shared by every
+// signed-in member of the org, with row-level security so one company's
+// data is never visible to another's (see supabase/schema.sql). That's
+// src/persistence.js; loadOrgData/saveShows/etc. are imported above.
 //
-// The uploaded script's PDF bytes are also split into their own IndexedDB
-// key, separate from the rest of the app state, so routine edits elsewhere
-// (renaming a crew member, moving a cue) don't re-serialize a multi-MB
-// blob on every autosave.
+// Per-device session state — which show THIS device is currently looking
+// at, which identity THIS device is signed in as for the callboard — stays
+// in IndexedDB, local to this browser only. Syncing those across every
+// device would mean one person's phone dictates what show everyone else's
+// screen jumps to, which is wrong. IndexedDB over localStorage for the
+// same reason as before: it doesn't block the main thread and has real
+// headroom if this ever needs to cache more locally (e.g. offline support).
+//
+// One complication shows up on both sides of this: six pieces of state
+// (departments, cast types, staff areas, band sections, inventory
+// categories, cue departments) store a lucide-react ICON COMPONENT as part
+// of each entry, and a React component reference can't be JSON-serialized
+// — it would silently vanish on save, whether to IndexedDB or Postgres. So
+// those six are serialized as label-only maps, and rehydrated by
+// re-attaching each entry's original icon (for the built-in categories) or
+// a taxonomy-appropriate fallback icon (for anything a user added later) —
+// the same fallback TaxonomyEditor already uses when creating a new entry,
+// so behavior doesn't change, only where the icon comes from.
 // ---------------------------------------------------------------------------
 const IDB_NAME = 'techdesk-db';
 const IDB_STORE = 'kv';
@@ -85,23 +97,30 @@ function deserializeTaxonomy(initialMap, fallbackIcon, labelMap) {
   return result;
 }
 
-// Script bytes are large and change far less often than everything else —
-// keep them out of the main autosave payload entirely.
-function splitScriptsForSave(shows) {
-  const scripts = {};
-  const lightShows = shows.map((s) => {
-    if (!s.script) return s;
-    scripts[s.id] = s.script;
-    return { ...s, script: { fileName: s.script.fileName, pageCount: s.script.pageCount, markers: s.script.markers, pdfBytes: null } };
-  });
-  return { lightShows, scripts };
-}
-function mergeScriptsOnLoad(lightShows, scripts) {
-  return (lightShows || []).map((s) => {
-    if (!s.script) return s;
-    const full = scripts && scripts[s.id];
-    return full ? { ...s, script: full } : s;
-  });
+// Diff-and-sync a collection against Supabase: whatever's in `items` gets
+// upserted, and whatever disappeared since the last successful sync gets
+// deleted server-side. The ref starts at null (not yet seeded) so the very
+// first run right after hydration never mistakes "we just loaded this from
+// the DB" for "everything was just deleted."
+function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError) {
+  const prevIdsRef = useRef(null);
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    const timeout = setTimeout(() => {
+      const currentIds = new Set(items.map(getId));
+      const removed = prevIdsRef.current ? [...prevIdsRef.current].filter((id) => !currentIds.has(id)) : [];
+      Promise.resolve()
+        .then(() => (removed.length ? deleteFn(removed) : null))
+        .then(() => saveFn(items))
+        .then(() => {
+          prevIdsRef.current = currentIds;
+          setLastSavedAt(new Date());
+        })
+        .catch(() => setPersistenceError(true));
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, items]);
 }
 
 // ---------------------------------------------------------------------------
@@ -4262,12 +4281,29 @@ function SettingsModule({
   MUSIC_SECTIONS, setMUSIC_SECTIONS, MUSIC_SECTION_ORDER, setMUSIC_SECTION_ORDER,
   INVENTORY_CATEGORIES, setINVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER, setINVENTORY_CATEGORY_ORDER,
   CUE_DEPTS, setCUE_DEPTS, CUE_DEPT_ORDER, setCUE_DEPT_ORDER,
-  lastSavedAt, persistenceError,
+  lastSavedAt, persistenceError, orgId, onSignOut,
 }) {
   const [newVenue, setNewVenue] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [newInstrument, setNewInstrument] = useState('');
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [orgName, setOrgName] = useState('your company');
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from('orgs')
+      .select('name')
+      .eq('id', orgId)
+      .single()
+      .then(({ data }) => {
+        if (!cancelled && data) setOrgName(data.name);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
 
   function addVenue() {
     const v = newVenue.trim();
@@ -4620,24 +4656,43 @@ function SettingsModule({
           <RotateCcw size={14} color={COLOR.textMuted} strokeWidth={1.75} />
           <span className="td-display" style={sectionTitle}>Data</span>
         </div>
-        <div className="td-body" style={sectionNote}>Clears everything added this session and restores the sample board.</div>
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>
+          This clears production data for your whole company — every show, every roster, everything — for everyone signed in, not just this device. Restores the sample board in its place.
+        </div>
         {confirmingReset ? (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted }}>Reset the whole board? This can't be undone.</span>
-            <button
-              onClick={() => { onReset(); setConfirmingReset(false); }}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 380 }}>
+            <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted }}>
+              Type your company's name (<strong>{orgName}</strong>) to confirm. This can't be undone.
+            </span>
+            <input
               className="td-focusable"
-              style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-            >
-              Confirm reset
-            </button>
-            <button
-              onClick={() => setConfirmingReset(false)}
-              className="td-focusable"
-              style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
-            >
-              Cancel
-            </button>
+              value={resetConfirmText}
+              onChange={(e) => setResetConfirmText(e.target.value)}
+              placeholder={orgName}
+              style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 10px', color: COLOR.textPrimary, fontSize: 12.5 }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => { onReset(); setConfirmingReset(false); setResetConfirmText(''); }}
+                disabled={resetConfirmText.trim() !== orgName}
+                className="td-focusable"
+                style={{
+                  background: resetConfirmText.trim() === orgName ? COLOR.amber : COLOR.slateDim,
+                  color: resetConfirmText.trim() === orgName ? COLOR.void : COLOR.textFaint,
+                  border: 'none', borderRadius: 3, padding: '7px 14px', fontSize: 12, fontWeight: 700,
+                  cursor: resetConfirmText.trim() === orgName ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Confirm reset
+              </button>
+              <button
+                onClick={() => { setConfirmingReset(false); setResetConfirmText(''); }}
+                className="td-focusable"
+                style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         ) : (
           <button
@@ -4648,6 +4703,36 @@ function SettingsModule({
             <RotateCcw size={13} /> Reset to demo data
           </button>
         )}
+      </div>
+
+      {/* Company */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+          <span className="td-display" style={sectionTitle}>Company</span>
+        </div>
+        <div className="td-body" style={sectionNote}>
+          Share this ID with teammates so they can join <strong>{orgName}</strong> from the "Join existing" option when they sign up.
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <code style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 10px', color: COLOR.textMuted, fontSize: 11.5, fontFamily: "'IBM Plex Mono', monospace" }}>
+            {orgId}
+          </code>
+          <button
+            onClick={() => navigator.clipboard && navigator.clipboard.writeText(orgId)}
+            className="td-focusable"
+            style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 10px', fontSize: 11, cursor: 'pointer' }}
+          >
+            Copy
+          </button>
+        </div>
+        <button
+          onClick={onSignOut}
+          className="td-focusable"
+          style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
+        >
+          Sign out
+        </button>
       </div>
     </div>
   );
@@ -8101,7 +8186,7 @@ function ScenesModule({ show, actors, setShows }) {
 // features in this file that depend on packages outside lucide-react —
 // see the import comment at the top of the file.
 // ---------------------------------------------------------------------------
-function ScriptModule({ show, cueSheets, setShows, CUE_DEPTS }) {
+function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
   const script = show.script;
   const cues = cueSheets[show.id] || [];
   const [pageNum, setPageNum] = useState(1);
@@ -8114,29 +8199,31 @@ function ScriptModule({ show, cueSheets, setShows, CUE_DEPTS }) {
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // (Re)load the pdfjs document whenever a different script's bytes come in.
+  // (Re)load the pdfjs document from Storage whenever a different show's
+  // script comes into view. The bytes never live in React state — only
+  // fileName/pageCount/markers do — so this always fetches fresh.
   useEffect(() => {
     let cancelled = false;
-    if (!script?.pdfBytes) {
+    if (!script) {
       setPdfDoc(null);
       return undefined;
     }
     (async () => {
       try {
-        const bytes = base64ToUint8Array(script.pdfBytes);
+        const bytes = await downloadScriptPdf(orgId, show.id);
         const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
         if (!cancelled) {
           setPdfDoc(doc);
           setPageNum(1);
         }
       } catch (err) {
-        if (!cancelled) setUploadError('Could not open that PDF for viewing.');
+        if (!cancelled) setUploadError('Could not load that script from storage.');
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [script?.pdfBytes]);
+  }, [orgId, show.id, script?.fileName]);
 
   // Render the current page to the canvas whenever the doc or page changes.
   useEffect(() => {
@@ -8178,12 +8265,12 @@ function ScriptModule({ show, cueSheets, setShows, CUE_DEPTS }) {
       const bytes = new Uint8Array(arrayBuffer);
       const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
       const pageCount = doc.numPages;
-      const base64 = uint8ArrayToBase64(bytes);
+      await uploadScriptPdf(orgId, show.id, file);
       setShows((prev) =>
-        prev.map((s) => (s.id === show.id ? { ...s, script: { fileName: file.name, pdfBytes: base64, pageCount, markers: [] } } : s))
+        prev.map((s) => (s.id === show.id ? { ...s, script: { fileName: file.name, pageCount, markers: [] } } : s))
       );
     } catch (err) {
-      setUploadError('Could not read that PDF. Try another file.');
+      setUploadError('Could not upload that PDF. Try again.');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -8191,6 +8278,7 @@ function ScriptModule({ show, cueSheets, setShows, CUE_DEPTS }) {
   }
 
   function replaceScript() {
+    deleteScriptPdf(orgId, show.id).catch(() => {});
     setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, script: null } : s)));
     setPlacingCueId(null);
   }
@@ -8221,7 +8309,7 @@ function ScriptModule({ show, cueSheets, setShows, CUE_DEPTS }) {
     if (!script) return;
     setExporting(true);
     try {
-      const bytes = base64ToUint8Array(script.pdfBytes);
+      const bytes = await downloadScriptPdf(orgId, show.id);
       const outDoc = await PDFDocument.load(bytes);
       const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
       const pages = outDoc.getPages();
@@ -8737,7 +8825,7 @@ function NoShowSelected({ shows, setCurrentShowId, label }) {
   );
 }
 
-export default function TechDeskDashboard() {
+export default function TechDeskDashboard({ orgId, onSignOut }) {
   const [active, setActive] = useState('dashboard');
   const [shows, setShows] = useState(seedShows);
   const [filter, setFilter] = useState('all');
@@ -8774,44 +8862,48 @@ export default function TechDeskDashboard() {
   const [persistenceError, setPersistenceError] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
-  // Load whatever was saved last time, once, on mount. If nothing's there
-  // yet (first visit) or IndexedDB isn't available at all, just proceed
-  // with the seed data already sitting in state above.
+  // Load this org's shared data from Supabase once, on mount. `currentShowId`
+  // and the four `currentXId` sign-in values are deliberately NOT part of
+  // this — those describe what THIS device is looking at / signed in as,
+  // and syncing them across every device would mean one person's phone
+  // dictates what show everyone else's screen jumps to. Those five stay in
+  // IndexedDB, local to this device only, same mechanism as before.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [appState, scripts] = await Promise.all([idbGet('appState'), idbGet('scripts')]);
-        if (!cancelled && appState) {
-          setShows(mergeScriptsOnLoad(appState.shows, scripts));
-          setCrew(appState.crew || seedCrew);
-          setActors(appState.actors || seedActors);
-          setStaff(appState.staff || seedStaff);
-          setMusicians(appState.musicians || seedMusicians);
-          setCalls(appState.calls || seedCalls);
-          setInventory(appState.inventory || seedInventory);
-          setCueSheets(appState.cueSheets || seedCueSheets);
-          setVenues(appState.venues || seedVenues);
-          setLocations(appState.locations || seedLocations);
-          setInstruments(appState.instruments || seedInstruments);
-          setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, appState.departments));
-          setDepartmentOrder(appState.departmentOrder || INITIAL_DEPARTMENT_ORDER);
-          setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, appState.castTypes));
-          setCastTypeOrder(appState.castTypeOrder || INITIAL_CAST_TYPE_ORDER);
-          setStaffAreas(deserializeTaxonomy(INITIAL_STAFF_AREAS, Briefcase, appState.staffAreas));
-          setStaffAreaOrder(appState.staffAreaOrder || INITIAL_STAFF_AREA_ORDER);
-          setMusicSections(deserializeTaxonomy(INITIAL_MUSIC_SECTIONS, Music, appState.musicSections));
-          setMusicSectionOrder(appState.musicSectionOrder || INITIAL_MUSIC_SECTION_ORDER);
-          setInventoryCategories(deserializeTaxonomy(INITIAL_INVENTORY_CATEGORIES, Boxes, appState.inventoryCategories));
-          setInventoryCategoryOrder(appState.inventoryCategoryOrder || INITIAL_INVENTORY_CATEGORY_ORDER);
-          setCueDepts(deserializeTaxonomy(INITIAL_CUE_DEPTS, ClipboardList, appState.cueDepts));
-          setCueDeptOrder(appState.cueDeptOrder || Object.keys(INITIAL_CUE_DEPTS));
-          setCurrentShowId(appState.currentShowId ?? null);
-          setCurrentUserId(appState.currentUserId ?? null);
-          setCurrentActorId(appState.currentActorId ?? null);
-          setCurrentStaffId(appState.currentStaffId ?? null);
-          setCurrentMusicianId(appState.currentMusicianId ?? null);
-        }
+        const data = await loadOrgData(orgId);
+        if (cancelled) return;
+        setShows(data.shows);
+        setCrew(data.crew);
+        setActors(data.actors);
+        setStaff(data.staff);
+        setMusicians(data.musicians);
+        setCalls(data.calls);
+        setInventory(data.inventory);
+        setCueSheets(data.cueSheets);
+        setVenues(data.settings.venues.length ? data.settings.venues : seedVenues);
+        setLocations(data.settings.locations.length ? data.settings.locations : seedLocations);
+        setInstruments(data.settings.instruments.length ? data.settings.instruments : seedInstruments);
+        setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS)));
+        setDepartmentOrder(data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER);
+        setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, Object.keys(data.settings.castTypes).length ? data.settings.castTypes : serializeTaxonomy(INITIAL_CAST_TYPES)));
+        setCastTypeOrder(data.settings.castTypeOrder.length ? data.settings.castTypeOrder : INITIAL_CAST_TYPE_ORDER);
+        setStaffAreas(deserializeTaxonomy(INITIAL_STAFF_AREAS, Briefcase, Object.keys(data.settings.staffAreas).length ? data.settings.staffAreas : serializeTaxonomy(INITIAL_STAFF_AREAS)));
+        setStaffAreaOrder(data.settings.staffAreaOrder.length ? data.settings.staffAreaOrder : INITIAL_STAFF_AREA_ORDER);
+        setMusicSections(deserializeTaxonomy(INITIAL_MUSIC_SECTIONS, Music, Object.keys(data.settings.musicSections).length ? data.settings.musicSections : serializeTaxonomy(INITIAL_MUSIC_SECTIONS)));
+        setMusicSectionOrder(data.settings.musicSectionOrder.length ? data.settings.musicSectionOrder : INITIAL_MUSIC_SECTION_ORDER);
+        setInventoryCategories(deserializeTaxonomy(INITIAL_INVENTORY_CATEGORIES, Boxes, Object.keys(data.settings.inventoryCategories).length ? data.settings.inventoryCategories : serializeTaxonomy(INITIAL_INVENTORY_CATEGORIES)));
+        setInventoryCategoryOrder(data.settings.inventoryCategoryOrder.length ? data.settings.inventoryCategoryOrder : INITIAL_INVENTORY_CATEGORY_ORDER);
+        setCueDepts(deserializeTaxonomy(INITIAL_CUE_DEPTS, ClipboardList, Object.keys(data.settings.cueDepts).length ? data.settings.cueDepts : serializeTaxonomy(INITIAL_CUE_DEPTS)));
+        setCueDeptOrder(data.settings.cueDeptOrder.length ? data.settings.cueDeptOrder : Object.keys(INITIAL_CUE_DEPTS));
+
+        const local = (await idbGet('deviceState')) || {};
+        setCurrentShowId(local.currentShowId ?? null);
+        setCurrentUserId(local.currentUserId ?? null);
+        setCurrentActorId(local.currentActorId ?? null);
+        setCurrentStaffId(local.currentStaffId ?? null);
+        setCurrentMusicianId(local.currentMusicianId ?? null);
       } catch (err) {
         if (!cancelled) setPersistenceError(true);
       } finally {
@@ -8822,39 +8914,89 @@ export default function TechDeskDashboard() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [orgId]);
 
-  // Autosave — debounced so a burst of typing doesn't trigger a write per
-  // keystroke, gated on `hydrated` so the initial seed data (which is only
-  // a placeholder until the load above finishes) never overwrites what was
-  // actually saved last session.
+  // Realtime — when anyone else on the team changes shared data, refetch
+  // and replace local state. Simple "go get the truth again" rather than
+  // patching individual fields client-side, which is much easier to get
+  // subtly wrong against nested JSONB.
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    const unsubscribe = subscribeToOrgChanges(orgId, () => {
+      loadOrgData(orgId)
+        .then((data) => {
+          setShows(data.shows);
+          setCrew(data.crew);
+          setActors(data.actors);
+          setStaff(data.staff);
+          setMusicians(data.musicians);
+          setCalls(data.calls);
+          setInventory(data.inventory);
+          setCueSheets(data.cueSheets);
+        })
+        .catch(() => setPersistenceError(true));
+    });
+    return unsubscribe;
+  }, [hydrated, orgId]);
+
+  // Per-device session state (not shared) — still IndexedDB, still debounced.
   useEffect(() => {
     if (!hydrated) return undefined;
     const timeout = setTimeout(() => {
-      const { lightShows, scripts } = splitScriptsForSave(shows);
-      const appState = {
-        shows: lightShows,
-        crew, actors, staff, musicians, calls, inventory, cueSheets,
-        venues, locations, instruments,
-        departments: serializeTaxonomy(departments), departmentOrder,
-        castTypes: serializeTaxonomy(castTypes), castTypeOrder,
-        staffAreas: serializeTaxonomy(staffAreas), staffAreaOrder,
-        musicSections: serializeTaxonomy(musicSections), musicSectionOrder,
-        inventoryCategories: serializeTaxonomy(inventoryCategories), inventoryCategoryOrder,
-        cueDepts: serializeTaxonomy(cueDepts), cueDeptOrder,
-        currentShowId, currentUserId, currentActorId, currentStaffId, currentMusicianId,
-      };
-      Promise.all([idbSet('appState', appState), idbSet('scripts', scripts)])
+      idbSet('deviceState', { currentShowId, currentUserId, currentActorId, currentStaffId, currentMusicianId }).catch(() => {});
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [hydrated, currentShowId, currentUserId, currentActorId, currentStaffId, currentMusicianId]);
+
+  // Shared production data — each collection syncs independently, and each
+  // diffs against what it saved last time so removed rows actually get
+  // deleted server-side instead of quietly sticking around forever.
+  useSyncedCollection(hydrated, shows, (s) => s.id, (items) => saveShows(items, orgId), deleteShows, setLastSavedAt, setPersistenceError);
+  useSyncedCollection(hydrated, crew, (p) => p.id, (items) => savePeople('crew', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
+  useSyncedCollection(hydrated, actors, (p) => p.id, (items) => savePeople('actor', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
+  useSyncedCollection(hydrated, staff, (p) => p.id, (items) => savePeople('staff', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
+  useSyncedCollection(hydrated, musicians, (p) => p.id, (items) => savePeople('musician', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
+  useSyncedCollection(hydrated, calls, (c) => c.id, (items) => saveCalls(items, orgId), deleteCalls, setLastSavedAt, setPersistenceError);
+  useSyncedCollection(hydrated, inventory, (i) => i.id, (items) => saveInventory(items, orgId), deleteInventory, setLastSavedAt, setPersistenceError);
+
+  // Cue sheets: keyed by show, replaced wholesale per show on change —
+  // simpler and safe since only one department is ever editing a given
+  // show's cue sheet at a time in practice.
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    const timeout = setTimeout(() => {
+      Promise.all(Object.entries(cueSheets).map(([showId, cues]) => saveCueSheetForShow(showId, cues, orgId)))
+        .then(() => setLastSavedAt(new Date()))
+        .catch(() => setPersistenceError(true));
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [hydrated, cueSheets, orgId]);
+
+  // Org settings — venues, locations, instruments, and every taxonomy —
+  // one row, always upserted.
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    const timeout = setTimeout(() => {
+      saveSettings(
+        {
+          venues, locations, instruments,
+          departments: serializeTaxonomy(departments), departmentOrder,
+          castTypes: serializeTaxonomy(castTypes), castTypeOrder,
+          staffAreas: serializeTaxonomy(staffAreas), staffAreaOrder,
+          musicSections: serializeTaxonomy(musicSections), musicSectionOrder,
+          inventoryCategories: serializeTaxonomy(inventoryCategories), inventoryCategoryOrder,
+          cueDepts: serializeTaxonomy(cueDepts), cueDeptOrder,
+        },
+        orgId
+      )
         .then(() => setLastSavedAt(new Date()))
         .catch(() => setPersistenceError(true));
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
   }, [
-    hydrated, shows, crew, actors, staff, musicians, calls, inventory, cueSheets,
-    venues, locations, instruments,
+    hydrated, orgId, venues, locations, instruments,
     departments, departmentOrder, castTypes, castTypeOrder, staffAreas, staffAreaOrder,
     musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
-    currentShowId, currentUserId, currentActorId, currentStaffId, currentMusicianId,
   ]);
 
   function resetAllData() {
@@ -9219,7 +9361,7 @@ export default function TechDeskDashboard() {
           ))}
         {active === 'script' &&
           (currentShow ? (
-            <ScriptModule show={currentShow} cueSheets={cueSheets} setShows={setShows} CUE_DEPTS={cueDepts} />
+            <ScriptModule show={currentShow} orgId={orgId} cueSheets={cueSheets} setShows={setShows} CUE_DEPTS={cueDepts} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="script" />
           ))}
@@ -9258,6 +9400,8 @@ export default function TechDeskDashboard() {
             setCUE_DEPT_ORDER={setCueDeptOrder}
             lastSavedAt={lastSavedAt}
             persistenceError={persistenceError}
+            orgId={orgId}
+            onSignOut={onSignOut}
           />
         )}
       </div>
