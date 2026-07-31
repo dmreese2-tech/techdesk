@@ -82,9 +82,17 @@ export default function Auth({ onReady }) {
     setError('');
     setBusy(true);
     try {
+      // getSession() only reads what's cached locally and can look valid
+      // even when Supabase's server would reject it. getUser() actually
+      // round-trips to confirm the session is still genuinely good right
+      // now, immediately before the write that depends on it.
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user) {
+        throw new Error('Your session isn\u2019t valid anymore — sign out and sign back in, then try again.');
+      }
       const { data: org, error: orgErr } = await supabase.from('orgs').insert({ name: newOrgName.trim() }).select().single();
       if (orgErr) throw orgErr;
-      const { error: memErr } = await supabase.from('org_members').insert({ org_id: org.id, user_id: session.user.id, role: 'admin' });
+      const { error: memErr } = await supabase.from('org_members').insert({ org_id: org.id, user_id: userData.user.id, role: 'admin' });
       if (memErr) throw memErr;
       onReady(org.id);
     } catch (err) {
@@ -100,11 +108,15 @@ export default function Auth({ onReady }) {
     setError('');
     setBusy(true);
     try {
-      const { error: memErr } = await supabase.from('org_members').insert({ org_id: joinOrgId.trim(), user_id: session.user.id, role: 'member' });
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user) {
+        throw new Error('Your session isn\u2019t valid anymore — sign out and sign back in, then try again.');
+      }
+      const { error: memErr } = await supabase.from('org_members').insert({ org_id: joinOrgId.trim(), user_id: userData.user.id, role: 'member' });
       if (memErr) throw memErr;
       onReady(joinOrgId.trim());
     } catch (err) {
-      setError('Could not join — check the company ID with your TD.');
+      setError(err.message && err.message.includes('valid') ? err.message : 'Could not join — check the company ID with your TD.');
     } finally {
       setBusy(false);
     }
