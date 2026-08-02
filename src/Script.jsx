@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Crosshair, Download, FileText, Upload } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { uploadScriptPdf, downloadScriptPdf, deleteScriptPdf } from './persistence.js';
 import { COLOR } from './theme.jsx';
+
+// The worker has to be pointed at a real URL before any page is rendered;
+// this module is the only place that touches pdfjs now, so it sets it here.
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
 import { cueCode } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 

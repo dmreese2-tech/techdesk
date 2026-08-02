@@ -1142,3 +1142,17 @@ export function buildAudioPlot(show, actors, musicians, CAST_TYPE_ORDER, MUSIC_S
     all: [...micChannels, ...diChannels, ...playbackChannels],
   };
 }
+
+// ---------------------------------------------------------------------------
+// NEW ITEM FORM
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ITEM DETAIL PANEL — what opening an inventory item gets you: editable
+// quantity, per-unit status history, full assignment control, and cost /
+// purchase records.
+// ---------------------------------------------------------------------------
+export const UNIT_STATUS_META = {
+  broken: { label: 'Broken', color: COLOR.slate },
+  repaired: { label: 'Repaired', color: COLOR.green },
+  retired: { label: 'Retired', color: COLOR.textFaint },
+};

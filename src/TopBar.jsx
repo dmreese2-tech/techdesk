@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, HelpCircle, MessageSquare, X, Zap } from 'lucide-react';
+import { ExternalLink, HelpCircle, MessageSquare, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
+import appMark from './assets/upstage-mark.png';
 
 // ---------------------------------------------------------------------------
 // TOP BAR
@@ -79,7 +80,7 @@ const HELP_SECTIONS = [
   },
 ];
 
-export function TopBar({ orgId, section }) {
+export function TopBar({ orgId, section, orgLogo }) {
   const [orgName, setOrgName] = useState('');
   const [help, setHelp] = useState(false);
 
@@ -122,14 +123,30 @@ export function TopBar({ orgId, section }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 3, background: COLOR.amber, color: COLOR.void, flexShrink: 0 }}>
-            <Zap size={14} strokeWidth={2.5} />
-          </span>
+          <img
+            src={appMark}
+            alt="upstage.systems"
+            width={24}
+            height={24}
+            style={{ width: 24, height: 24, borderRadius: 4, flexShrink: 0, display: 'block' }}
+          />
           <span className="td-display" style={{ fontSize: 14, color: COLOR.textPrimary, letterSpacing: '0.08em' }}>Tech Desk</span>
-          {orgName && (
+          {(orgName || orgLogo) && (
             <>
               <span style={{ color: COLOR.line }}>|</span>
-              <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orgName}</span>
+              {/* The company's own mark, if they've uploaded one. It sits beside
+                  the app mark rather than replacing it — this is Tech Desk, run
+                  by them, and the bar should say both. */}
+              {orgLogo && (
+                <img
+                  src={orgLogo}
+                  alt={orgName ? `${orgName} logo` : 'Company logo'}
+                  style={{ height: 22, maxWidth: 96, width: 'auto', objectFit: 'contain', flexShrink: 0, display: 'block', borderRadius: 3 }}
+                />
+              )}
+              {orgName && (
+                <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orgName}</span>
+              )}
             </>
           )}
         </div>

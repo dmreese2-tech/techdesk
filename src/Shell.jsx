@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { PanelLeftClose, PanelLeftOpen, Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { supabase } from './supabaseClient.js';
 import { STATUS_META } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 

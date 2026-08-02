@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Boxes, Briefcase, Check, ClipboardList, Copy, Layers, MapPin, Music, Pencil, Plus, RotateCcw, Star, Users, X } from 'lucide-react';
+import { Box, Boxes, Briefcase, Check, ClipboardList, Copy, Image as ImageIcon, Layers, MapPin, Music, Pencil, Plus, RotateCcw, Star, Upload, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
 import { PositionsPanel } from './Positions.jsx';
 
@@ -146,9 +147,149 @@ export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defa
     </div>
   );
 }
+// ---------------------------------------------------------------------------
+// COMPANY LOGO
+//
+// Stored as a small data URL on org_settings, not in a storage bucket: it's one
+// tiny image per company, everyone who can read the settings can already see
+// the company name, and this way it arrives with the rest of the settings in
+// the same round trip the app already makes.
+//
+// Whatever gets picked is redrawn onto a canvas at bar size before it's saved,
+// so a 4 MB photo from someone's phone becomes a few kilobytes and the row
+// stays small enough to sync without anyone noticing.
+// ---------------------------------------------------------------------------
+const LOGO_MAX_H = 64;   // twice the 22px it renders at, for sharp screens
+const LOGO_MAX_W = 260;
+const LOGO_MAX_BYTES = 160 * 1024;
+
+function shrinkToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("That file couldn't be read."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That doesn't look like an image file."));
+      img.onload = () => {
+        const scale = Math.min(LOGO_MAX_H / img.height, LOGO_MAX_W / img.width, 1);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        // PNG first so a logo with a transparent background stays transparent;
+        // fall back to JPEG on white only if the PNG is too heavy to store.
+        let url = canvas.toDataURL('image/png');
+        if (url.length > LOGO_MAX_BYTES) {
+          ctx.globalCompositeOperation = 'destination-over';
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          url = canvas.toDataURL('image/jpeg', 0.85);
+        }
+        if (url.length > LOGO_MAX_BYTES) {
+          reject(new Error('That image is too detailed to store. Try a simpler or smaller one.'));
+          return;
+        }
+        resolve(url);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export function CompanyLogoPanel({ orgLogo, setOrgLogo, sectionTitle, sectionNote }) {
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const inputRef = React.useRef(null);
+
+  async function onPick(event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';   // so picking the same file twice still fires
+    if (!file) return;
+    setError('');
+    if (!/^image\//.test(file.type)) {
+      setError("That doesn't look like an image file.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('That file is over 8 MB. Pick something smaller.');
+      return;
+    }
+    setBusy(true);
+    try {
+      setOrgLogo(await shrinkToDataUrl(file));
+    } catch (e) {
+      setError(e.message || "That image couldn't be used.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <ImageIcon size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+        <span className="td-display" style={sectionTitle}>Company Logo</span>
+      </div>
+      <div className="td-body" style={sectionNote}>
+        Appears in the top bar just before the company name, next to the Tech Desk mark — it sits alongside the app logo rather than replacing it. A wide image with a transparent background reads best.
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 132,
+            height: 52,
+            padding: '0 12px',
+            background: COLOR.void,
+            border: `1px solid ${COLOR.line}`,
+            borderRadius: 4,
+          }}
+        >
+          {orgLogo ? (
+            <img src={orgLogo} alt="Company logo" style={{ maxHeight: 36, maxWidth: 180, width: 'auto', display: 'block' }} />
+          ) : (
+            <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint, letterSpacing: '0.08em' }}>NO LOGO</span>
+          )}
+        </div>
+
+        <input ref={inputRef} type="file" accept="image/*" onChange={onPick} style={{ display: 'none' }} />
+        <button
+          onClick={() => inputRef.current && inputRef.current.click()}
+          disabled={busy}
+          className="td-focusable"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', color: COLOR.textPrimary, border: `1px solid ${COLOR.lineBright}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}
+        >
+          <Upload size={13} /> {busy ? 'Working…' : orgLogo ? 'Replace logo' : 'Upload logo'}
+        </button>
+        {orgLogo && (
+          <button
+            onClick={() => { setOrgLogo(''); setError(''); }}
+            className="td-focusable"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
+          >
+            <X size={13} /> Remove
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="td-body" style={{ fontSize: 12, color: COLOR.amber, marginTop: 10 }}>{error}</div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsModule({
   positions,
   setPositions,
+  orgLogo, setOrgLogo,
   venues, setVenues, locations, setLocations, instruments, setInstruments, onReset,
   DEPARTMENTS, setDEPARTMENTS, DEPARTMENT_ORDER, setDEPARTMENT_ORDER,
   CAST_TYPES, setCAST_TYPES, CAST_TYPE_ORDER, setCAST_TYPE_ORDER,
@@ -215,6 +356,9 @@ export function SettingsModule({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32, maxWidth: 640 }}>
+      {/* Company Logo */}
+      <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} sectionTitle={sectionTitle} sectionNote={sectionNote} />
+
       {/* Venues & Spaces */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>

@@ -275,19 +275,6 @@ const SECTION_IDS = [
 
 
 
-// ---------------------------------------------------------------------------
-// NEW ITEM FORM
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// ITEM DETAIL PANEL — what opening an inventory item gets you: editable
-// quantity, per-unit status history, full assignment control, and cost /
-// purchase records.
-// ---------------------------------------------------------------------------
-const UNIT_STATUS_META = {
-  broken: { label: 'Broken', color: COLOR.slate },
-  repaired: { label: 'Repaired', color: COLOR.green },
-  retired: { label: 'Retired', color: COLOR.textFaint },
-};
 
 
 
@@ -384,6 +371,9 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // Company-level job titles for crew, band and staff, so the same position
   // reads the same way on every show instead of being retyped per assignment.
   const [positions, setPositions] = useState({ crew: [], musician: [], staff: [] });
+  // The company's own logo, kept as a small data URL on org_settings so it
+  // travels with the company rather than the browser that uploaded it.
+  const [orgLogo, setOrgLogo] = useState('');
   // On a phone the rail is a drawer over the content rather than a column
   // beside it; on a desktop it stays put and this flag is ignored.
   const isNarrow = useIsNarrow();
@@ -456,6 +446,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         setLocations(data.settings.locations.length ? data.settings.locations : seedLocations);
         setInstruments(data.settings.instruments.length ? data.settings.instruments : seedInstruments);
         setPositions(data.settings.positions || { crew: [], musician: [], staff: [] });
+        setOrgLogo(data.settings.logoUrl || '');
         setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS)));
         setDepartmentOrder(data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER);
         setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, Object.keys(data.settings.castTypes).length ? data.settings.castTypes : serializeTaxonomy(INITIAL_CAST_TYPES)));
@@ -570,7 +561,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     const timeout = setTimeout(() => {
       saveSettings(
         {
-          venues, locations, instruments, positions,
+          venues, locations, instruments, positions, logoUrl: orgLogo,
           departments: serializeTaxonomy(departments), departmentOrder,
           castTypes: serializeTaxonomy(castTypes), castTypeOrder,
           staffAreas: serializeTaxonomy(staffAreas), staffAreaOrder,
@@ -585,7 +576,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
   }, [
-    hydrated, orgId, venues, locations, instruments, positions,
+    hydrated, orgId, venues, locations, instruments, positions, orgLogo,
     departments, departmentOrder, castTypes, castTypeOrder, staffAreas, staffAreaOrder,
     musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
   ]);
@@ -606,6 +597,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     setVenues(seedVenues);
     setLocations(seedLocations);
     setInstruments(seedInstruments);
+    setOrgLogo('');
     setDepartments(INITIAL_DEPARTMENTS);
     setDepartmentOrder(INITIAL_DEPARTMENT_ORDER);
     setCastTypes(INITIAL_CAST_TYPES);
@@ -769,7 +761,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: COLOR.void }}>
       {FONTS}
-      <TopBar orgId={orgId} section={active} />
+      <TopBar orgId={orgId} section={active} orgLogo={orgLogo} />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <Sidebar
         active={active}
@@ -1087,6 +1079,8 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             onSignOut={onSignOut}
             positions={positions}
             setPositions={setPositions}
+            orgLogo={orgLogo}
+            setOrgLogo={setOrgLogo}
           />
         )}
       </div>

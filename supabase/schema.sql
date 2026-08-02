@@ -178,6 +178,8 @@ create table if not exists org_settings (
   venues jsonb not null default '[]',
   locations jsonb not null default '[]',
   instruments jsonb not null default '[]',
+  -- Company logo for the top bar, as a small data URL (see 03-company-logo.sql).
+  logo_url text,
   departments jsonb not null default '{}',
   department_order jsonb not null default '[]',
   cast_types jsonb not null default '{}',

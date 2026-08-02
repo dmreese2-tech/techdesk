@@ -118,11 +118,12 @@ function rowsToCueSheets(rows) {
 const DEFAULT_TAXONOMY_JSON = { departments: {}, departmentOrder: [], castTypes: {}, castTypeOrder: [], staffAreas: {}, staffAreaOrder: [], musicSections: {}, musicSectionOrder: [], inventoryCategories: {}, inventoryCategoryOrder: [], cueDepts: {}, cueDeptOrder: [] };
 
 function settingsRowToJs(row) {
-  if (!row) return { venues: [], locations: [], instruments: [], positions: { crew: [], musician: [], staff: [] }, ...DEFAULT_TAXONOMY_JSON };
+  if (!row) return { venues: [], locations: [], instruments: [], logoUrl: '', positions: { crew: [], musician: [], staff: [] }, ...DEFAULT_TAXONOMY_JSON };
   return {
     venues: row.venues || [],
     locations: row.locations || [],
     instruments: row.instruments || [],
+    logoUrl: row.logo_url || '',
     positions: {
       crew: row.crew_positions || [],
       musician: row.musician_positions || [],
@@ -241,6 +242,7 @@ export async function saveSettings(settings, orgId) {
     venues: settings.venues,
     locations: settings.locations,
     instruments: settings.instruments,
+    logo_url: settings.logoUrl || null,
     crew_positions: settings.positions?.crew || [],
     musician_positions: settings.positions?.musician || [],
     staff_positions: settings.positions?.staff || [],
@@ -258,7 +260,17 @@ export async function saveSettings(settings, orgId) {
     cue_dept_order: settings.cueDeptOrder,
   };
   const { error } = await supabase.from('org_settings').upsert(row);
-  if (error) throw error;
+  if (!error) return;
+  // If 03-company-logo.sql hasn't been run on this project yet, PostgREST
+  // rejects the whole row for the one column it doesn't know about. Everything
+  // else in Settings is more important than the logo, so save it without.
+  if (error.code === 'PGRST204' || /logo_url/.test(error.message || '')) {
+    delete row.logo_url;
+    const retry = await supabase.from('org_settings').upsert(row);
+    if (retry.error) throw retry.error;
+    return;
+  }
+  throw error;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import { AlertTriangle, DollarSign, Maximize2, Pencil, Plus, Wrench, X } from 'l
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { AudioSectionHeader } from './Audio.jsx';
-import { TODAY_STR, conditionForItem, formatShortDate, itemCheckedOut, itemConflicts, itemOutOfService } from './shared.jsx';
+import { TODAY_STR, UNIT_STATUS_META, conditionForItem, formatShortDate, itemCheckedOut, itemConflicts, itemOutOfService } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // INVENTORY — the stock room: what the shop owns, per-unit condition, what it
