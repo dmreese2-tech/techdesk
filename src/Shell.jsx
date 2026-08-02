@@ -272,6 +272,8 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
     textAlign: 'left',
     borderLeft: '2px solid transparent',
     width: '100%',
+    overflow: 'hidden',
+    justifyContent: collapsed && !isNarrow ? 'center' : 'flex-start',
   };
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
@@ -299,7 +301,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
         width: !isNarrow && collapsed ? 56 : 200,
         background: COLOR.panel,
         borderRight: `1px solid ${COLOR.line}`,
-        padding: '20px 12px',
+        padding: !isNarrow && collapsed ? '20px 6px' : '20px 12px',
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
@@ -346,11 +348,15 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
             key={item.id}
             onClick={() => { setActive(item.id); if (onClose) onClose(); }}
             className="td-focusable"
+            title={collapsed && !isNarrow ? item.label : undefined}
+            aria-label={item.label}
             style={{
               display: 'flex',
               alignItems: 'center',
+              justifyContent: collapsed && !isNarrow ? 'center' : 'flex-start',
               gap: 10,
-              padding: '9px 10px',
+              overflow: 'hidden',
+              padding: collapsed && !isNarrow ? '9px 0' : '9px 10px',
               borderRadius: 3,
               border: 'none',
               background: isActive ? COLOR.card : 'transparent',
@@ -360,8 +366,10 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
               borderLeft: isActive ? `2px solid ${COLOR.amber}` : '2px solid transparent',
             }}
           >
-            <Icon size={15} strokeWidth={1.75} />
-            <span className="td-body" style={{ fontSize: 13 }}>{item.label}</span>
+            <Icon size={15} strokeWidth={1.75} style={{ flexShrink: 0 }} />
+            {(!collapsed || isNarrow) && (
+              <span className="td-body" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{item.label}</span>
+            )}
           </button>
         );
         })}
@@ -370,11 +378,11 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
           <button onClick={() => { if (onClose) onClose(); onChangeCompany(); }} className="td-focusable" title={collapsed && !isNarrow ? 'Change company' : undefined} style={footerButton}>
-            <Building2 size={15} strokeWidth={1.75} />
+            <Building2 size={15} strokeWidth={1.75} style={{ flexShrink: 0 }} />
             {(!collapsed || isNarrow) && <span className="td-body" style={{ fontSize: 13 }}>Change company</span>}
           </button>
           <button onClick={onSignOut} className="td-focusable" title={collapsed && !isNarrow ? 'Sign out' : undefined} style={footerButton}>
-            <LogOut size={15} strokeWidth={1.75} />
+            <LogOut size={15} strokeWidth={1.75} style={{ flexShrink: 0 }} />
             {(!collapsed || isNarrow) && <span className="td-body" style={{ fontSize: 13 }}>Sign out</span>}
           </button>
         </div>
