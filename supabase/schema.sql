@@ -65,7 +65,7 @@ $$;
 -- SHOWS
 -- ---------------------------------------------------------------------------
 create table if not exists shows (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
   title text not null,
   venue text,
@@ -95,7 +95,7 @@ create index if not exists shows_org_id_idx on shows(org_id);
 -- discriminator instead of four near-identical tables.
 -- ---------------------------------------------------------------------------
 create table if not exists people (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
   kind text not null check (kind in ('crew', 'actor', 'staff', 'musician')),
   name text not null,
@@ -112,9 +112,9 @@ create index if not exists people_kind_idx on people(org_id, kind);
 -- CALLS
 -- ---------------------------------------------------------------------------
 create table if not exists calls (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
-  show_id uuid not null references shows(id) on delete cascade,
+  show_id text not null references shows(id) on delete cascade,
   call_date date not null,
   call_time text not null,
   label text not null,
@@ -131,7 +131,7 @@ create index if not exists calls_show_id_idx on calls(show_id);
 -- INVENTORY
 -- ---------------------------------------------------------------------------
 create table if not exists inventory_items (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
   asset_no text,
   name text not null,
@@ -154,9 +154,9 @@ create index if not exists inventory_items_org_id_idx on inventory_items(org_id)
 -- during a show and benefits from row-level updates + realtime.
 -- ---------------------------------------------------------------------------
 create table if not exists cues (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
-  show_id uuid not null references shows(id) on delete cascade,
+  show_id text not null references shows(id) on delete cascade,
   num int not null,
   dept text not null,
   description text,
