@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Pencil, Plus, UserCheck, UserX, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { PERSON_TYPES, PERSON_TYPE_ORDER, TODAY, TODAY_STR, assignmentFor, defaultAssignmentFields, formatShortDate, formatTime12h, parseTime12hTo24h, rosterForType, sceneById, setterForType } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -849,6 +850,25 @@ export function CallsModule({ show, venues, calls, setCalls, rosters, currentIds
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-calls`}
+          rows={() =>
+            showCalls.flatMap((call) =>
+              (call.slots || []).map((s) => ({
+                Date: call.date || '',
+                Time: call.time ? formatTime12h(call.time) : '',
+                Call: call.label || '',
+                Location: call.location || '',
+                Type: (PERSON_TYPES[s.personType] || {}).label || s.personType || '',
+                Role: s.role || '',
+                'Filled by': s.filledBy ? (rosterForType(s.personType, rosters).find((p) => p.id === s.filledBy) || {}).name || '' : '',
+                Attendance: s.attendance || '',
+              }))
+            )
+          }
+        />
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         {PERSON_TYPE_ORDER.map((t) => {
           const roster = rosterForType(t, rosters);

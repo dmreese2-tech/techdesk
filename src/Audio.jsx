@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Mic, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { buildAudioPlot } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -188,6 +189,17 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-audio-plot`}
+          rows={() => [
+            ...(plot.micChannels || []).map((r) => ({ Type: 'Mic', Channel: r.channel || '', Name: r.name || '', Role: r.role || '', Group: r.group || '' })),
+            ...(plot.diChannels || []).map((r) => ({ Type: 'DI', Channel: r.channel || '', Name: r.name || '', Role: r.role || '', Group: r.group || '' })),
+            ...(plot.monitorMixes || []).map((r) => ({ Type: 'Monitor mix', Channel: r.mix || r.channel || '', Name: r.name || '', Role: r.role || '', Group: r.group || '' })),
+            ...(show.soundEffects || []).map((e) => ({ Type: 'Sound effect', Channel: '', Name: e.label || e.name || '', Role: e.notes || '', Group: '' })),
+          ]}
+        />
+      </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
         <span className="td-mono" style={{ fontSize: 11, color: COLOR.textMuted }}>
           <strong style={{ color: COLOR.amber }}>{plot.micChannels.length}</strong> mic'd

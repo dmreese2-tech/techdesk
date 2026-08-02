@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Mic, Pencil, Plus, Settings, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { assignmentFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -634,6 +635,25 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show ? show.title : 'company'}-${personLabel}`}
+          rows={() =>
+            people.map((p) => {
+              const a = show ? assignmentFor(p, show.id) : null;
+              return {
+                Name: p.name,
+                'On this show': a ? 'yes' : 'no',
+                Role: a ? a.roleTitle || '' : '',
+                Category: a ? (categoryMap[a.category] || {}).label || a.category || '' : '',
+                Mic: a ? a.micChannel || '' : '',
+                Phone: p.phone || '',
+                Email: p.email || '',
+              };
+            })
+          }
+        />
+      </div>
       {show ? (
         <PeopleSignIn
           personLabel={personLabel}

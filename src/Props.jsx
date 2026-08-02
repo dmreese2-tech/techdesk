@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { PROP_SOURCES, PROP_SOURCE_ORDER, allScenes, assignmentFor, sceneLabel } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -320,6 +321,25 @@ export function PropsModule({ show, actors, inventory, locations, setShows, char
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-props`}
+          rows={() =>
+            (show.props || []).map((p) => ({
+              Scene: sceneLabel(show, p.sceneId),
+              Character: ((characters || []).find((ch) => ch.id === p.characterId) || {}).name || '',
+              'Handled by': (showActors.find((a) => a.id === p.actorId) || {}).name || '',
+              Prop: p.description || '',
+              Source: (PROP_SOURCES[p.source] || {}).label || p.source || '',
+              Acquired: p.acquired ? 'yes' : 'no',
+              Consumable: p.consumable ? 'yes' : 'no',
+              Location: p.location || '',
+              Cost: p.cost ?? 0,
+              Notes: p.notes || '',
+            }))
+          }
+        />
+      </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 18 }}>
         <span className="td-mono" style={{ fontSize: 11, color: COLOR.textMuted }}>
           <strong style={{ color: COLOR.amber }}>{props_.length}</strong> prop needs

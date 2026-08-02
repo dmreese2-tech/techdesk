@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { BUILD_STATUSES, BUILD_STATUS_ORDER } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -335,6 +336,20 @@ export function SetModule({ show, inventory, setInventory, locations, setShows, 
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-set`}
+          rows={() =>
+            (show.setPieces || []).map((p) => ({
+              Piece: p.name || '',
+              Status: (BUILD_STATUSES[p.status] || {}).label || p.status || '',
+              Components: (p.components || []).map((c) => `${c.qty} x ${(inventory.find((i) => i.id === c.itemId) || {}).name || 'item'}`).join('; '),
+              Location: p.location || '',
+              Notes: p.notes || '',
+            }))
+          }
+        />
+      </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 18 }}>
         <span className="td-mono" style={{ fontSize: 11, color: COLOR.textMuted }}>
           <strong style={{ color: COLOR.amber }}>{pieces.length}</strong> pieces on the build list

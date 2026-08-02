@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { STATUS_META } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
@@ -257,7 +257,7 @@ export function useIsNarrow() {
   return narrow;
 }
 
-export function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany, isNarrow, open, onClose }) {
+export function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany, isNarrow, open, onClose, collapsed, onToggleCollapse }) {
   // Bottom-of-rail actions: leaving this company, and leaving the app entirely.
   const footerButton = {
     display: 'flex',
@@ -296,7 +296,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
   return (
     <div
       style={{
-        width: 200,
+        width: !isNarrow && collapsed ? 56 : 200,
         background: COLOR.panel,
         borderRight: `1px solid ${COLOR.line}`,
         padding: '20px 12px',
@@ -307,7 +307,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
         ...(isNarrow
           ? {
               position: 'fixed',
-              top: 0,
+              top: 44,
               bottom: 0,
               left: 0,
               zIndex: 60,
@@ -319,10 +319,25 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
           : {}),
       }}
     >
-      <div className="td-display" style={{ color: COLOR.textPrimary, fontSize: 16, letterSpacing: '0.08em', padding: '0 10px 16px' }}>
-        Tech Desk
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed && !isNarrow ? 'center' : 'space-between', padding: '0 6px 16px', gap: 6 }}>
+        {(!collapsed || isNarrow) && (
+          <div className="td-display" style={{ color: COLOR.textPrimary, fontSize: 16, letterSpacing: '0.08em', padding: '0 4px' }}>
+            Tech Desk
+          </div>
+        )}
+        {!isNarrow && (
+          <button
+            onClick={onToggleCollapse}
+            className="td-focusable"
+            title={collapsed ? 'Expand menu' : 'Collapse menu to icons'}
+            aria-label={collapsed ? 'Expand menu' : 'Collapse menu to icons'}
+            style={{ background: 'transparent', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex', padding: 4 }}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        )}
       </div>
-      <ShowSwitcher shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} />
+      {(!collapsed || isNarrow) && <ShowSwitcher shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} />}
       {items.map((item) => {
         const Icon = item.icon;
         const isActive = active === item.id;
@@ -354,13 +369,13 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
         <div style={{ flex: 1 }} />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
-          <button onClick={() => { if (onClose) onClose(); onChangeCompany(); }} className="td-focusable" style={footerButton}>
+          <button onClick={() => { if (onClose) onClose(); onChangeCompany(); }} className="td-focusable" title={collapsed && !isNarrow ? 'Change company' : undefined} style={footerButton}>
             <Building2 size={15} strokeWidth={1.75} />
-            <span className="td-body" style={{ fontSize: 13 }}>Change company</span>
+            {(!collapsed || isNarrow) && <span className="td-body" style={{ fontSize: 13 }}>Change company</span>}
           </button>
-          <button onClick={onSignOut} className="td-focusable" style={footerButton}>
+          <button onClick={onSignOut} className="td-focusable" title={collapsed && !isNarrow ? 'Sign out' : undefined} style={footerButton}>
             <LogOut size={15} strokeWidth={1.75} />
-            <span className="td-body" style={{ fontSize: 13 }}>Sign out</span>
+            {(!collapsed || isNarrow) && <span className="td-body" style={{ fontSize: 13 }}>Sign out</span>}
           </button>
         </div>
     </div>

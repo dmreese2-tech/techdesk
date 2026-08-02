@@ -17,6 +17,7 @@ import {
 } from './persistence.js';
 import { supabase } from './supabaseClient.js';
 import { CharactersPanel } from './Characters.jsx';
+import { TopBar } from './TopBar.jsx';
 
 // ---------------------------------------------------------------------------
 // PERSISTENCE — two stores, doing two different jobs.
@@ -387,6 +388,24 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // beside it; on a desktop it stays put and this flag is ignored.
   const isNarrow = useIsNarrow();
   const [navOpen, setNavOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('td-nav-collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleNavCollapsed = () => {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('td-nav-collapsed', next ? '1' : '0');
+      } catch {
+        // Private browsing: the choice just won't survive a reload.
+      }
+      return next;
+    });
+  };
 
   // Growing the window back past the breakpoint leaves the drawer stranded
   // open behind a rail that's now permanent, so close it.
@@ -748,8 +767,10 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: COLOR.void }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: COLOR.void }}>
       {FONTS}
+      <TopBar orgId={orgId} section={active} />
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <Sidebar
         active={active}
         setActive={setActive}
@@ -761,13 +782,15 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         isNarrow={isNarrow}
         open={navOpen}
         onClose={() => setNavOpen(false)}
+        collapsed={navCollapsed}
+        onToggleCollapse={toggleNavCollapsed}
       />
 
       {isNarrow && navOpen && (
         <div
           onClick={() => setNavOpen(false)}
           aria-hidden="true"
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 55 }}
+          style={{ position: 'fixed', top: 44, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', zIndex: 55 }}
         />
       )}
 
@@ -1066,6 +1089,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             setPositions={setPositions}
           />
         )}
+      </div>
       </div>
     </div>
   );

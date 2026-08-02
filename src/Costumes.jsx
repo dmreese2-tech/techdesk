@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { COSTUME_SOURCES, COSTUME_SOURCE_ORDER, assignmentFor, sceneLabel } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -288,6 +289,24 @@ export function CostumesModule({ show, actors, inventory, locations, setShows, c
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-costumes`}
+          rows={() =>
+            (show.costumes || []).map((c) => ({
+              Character: ((characters || []).find((ch) => ch.id === c.characterId) || {}).name || '',
+              Actor: (showActors.find((a) => a.id === c.actorId) || {}).name || '',
+              Scene: sceneLabel(show, c.sceneId),
+              Item: c.description || '',
+              Source: (COSTUME_SOURCES[c.source] || {}).label || c.source || '',
+              Acquired: c.acquired ? 'yes' : 'no',
+              Location: c.location || '',
+              Cost: c.cost ?? 0,
+              Notes: c.notes || '',
+            }))
+          }
+        />
+      </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 18 }}>
         <span className="td-mono" style={{ fontSize: 11, color: COLOR.textMuted }}>
           <strong style={{ color: COLOR.amber }}>{costumes.length}</strong> costume needs

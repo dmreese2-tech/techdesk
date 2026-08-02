@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, DollarSign, Maximize2, Pencil, Plus, Wrench, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { AudioSectionHeader } from './Audio.jsx';
 import { TODAY_STR, conditionForItem, formatShortDate, itemCheckedOut, itemConflicts, itemOutOfService } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
@@ -587,6 +588,26 @@ export function InventoryModule({ show, shows, calls, inventory, setInventory, l
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename="inventory"
+          rows={() =>
+            inventory.map((item) => ({
+              'Asset no': item.assetNo || '',
+              Name: item.name,
+              Category: (INVENTORY_CATEGORIES[item.category] || {}).label || item.category || '',
+              Quantity: item.totalQty ?? 0,
+              'Out on a show': itemCheckedOut(item),
+              'Out of service': itemOutOfService(item),
+              Location: item.location || '',
+              'Cost per unit': item.costPerUnit ?? 0,
+              'Purchased on': item.purchaseDate || '',
+              'Purchased from': item.purchaseSource || '',
+              Notes: item.purchaseNotes || '',
+            }))
+          }
+        />
+      </div>
       {!show && (
         <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 16 }}>
           No show selected — adding general shop stock. Pick a show from the sidebar to pull gear for a specific production or call.

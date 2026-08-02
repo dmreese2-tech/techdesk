@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Briefcase, Music, Pencil, Plus, Star, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { MILESTONE_PRESETS, TODAY, addMinutesToTime, assignmentFor, formatDuration, formatShortDate, formatTime12h } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -332,6 +333,21 @@ export function ScheduleModule({ show, rosters, onScheduleChange }) {
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-schedule`}
+          rows={() =>
+            (show.schedule || []).slice().sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)).map((e) => ({
+              Date: e.date || '',
+              Time: e.time ? formatTime12h(e.time) : '',
+              Entry: e.label || '',
+              Location: e.location || '',
+              Duration: e.durationMinutes ? formatDuration(e.durationMinutes) : '',
+              Notes: e.notes || '',
+            }))
+          }
+        />
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', gap: 6 }}>
           {['list', 'calendar'].map((v) => (

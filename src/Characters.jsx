@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ExportCsvButton } from './csv.jsx';
 
 // ---------------------------------------------------------------------------
 // CHARACTERS — its own section, not a lodger inside Scenes. A character list
@@ -147,6 +148,19 @@ export function CharactersPanel({ show, setShows }) {
       <div className="td-body" style={sectionNote}>
         The roles in {show.title}. Cast actors into these under Actors, and hang costumes and props off them
         instead of retyping names. Tick the scenes each character appears in and the rest of the app knows who is on stage when.
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-characters`}
+          rows={() =>
+            characters.map((c) => ({
+              Character: c.name,
+              Scenes: scenesFor(c.id).join('; '),
+              'Scene count': scenesFor(c.id).length,
+            }))
+          }
+        />
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, maxWidth: 520 }}>

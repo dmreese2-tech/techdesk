@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Mail, Pencil, Phone, Plus, Settings, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { assignmentFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -503,6 +504,24 @@ export function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurre
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show ? show.title : 'company'}-crew`}
+          rows={() =>
+            crew.map((m) => {
+              const a = show ? assignmentFor(m, show.id) : null;
+              return {
+                Name: m.name,
+                'On this show': a ? 'yes' : 'no',
+                Position: a ? a.role || '' : '',
+                Department: a ? (DEPARTMENTS[a.dept] || {}).label || a.dept || '' : '',
+                Phone: m.phone || '',
+                Email: m.email || '',
+              };
+            })
+          }
+        />
+      </div>
       {show && <IdentitySignIn show={show} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={DEPARTMENTS} DEPARTMENT_ORDER={DEPARTMENT_ORDER} positions={positions} />}
 
       {!show && (

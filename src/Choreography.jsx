@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Footprints, Pencil, Plus, Video, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { SCENE_TYPES, allScenes, assignmentFor, sceneById } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -395,6 +396,20 @@ export function ChoreographyModule({ show, actors, setShows }) {
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ExportCsvButton
+          filename={`${show.title}-choreography`}
+          rows={() =>
+            (show.choreography || []).map((e) => ({
+              Scene: sceneById(show, e.sceneId) ? (sceneById(show, e.sceneId).name || '') : '',
+              Notes: e.notes || '',
+              'Reference video': e.videoUrl || '',
+              'Video label': e.videoLabel || '',
+              Diagrams: (e.diagrams || []).length,
+            }))
+          }
+        />
+      </div>
       {!hasScenes && (
         <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 16 }}>
           No scenes set up yet — add Acts and Scenes on the Scenes page before logging blocking.

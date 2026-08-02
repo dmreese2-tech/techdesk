@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Footprints, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ExportCsvButton } from './csv.jsx';
 import { SCENE_TYPES, SCENE_TYPE_ORDER, assignmentFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -296,6 +297,23 @@ export function ScenesModule({ show, actors, setShows }) {
 
       <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 18 }}>
         This is the canonical scene list — Choreography, Costumes, and Props all reference scenes from here instead of typing a scene name each time.
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+        <ExportCsvButton
+          filename={`${show.title}-scenes`}
+          rows={() =>
+            (show.acts || []).flatMap((act) =>
+              (act.scenes || []).map((sc, i) => ({
+                Act: act.name || '',
+                '#': i + 1,
+                Scene: sc.name || '',
+                Type: (SCENE_TYPES[sc.type] || {}).label || sc.type || '',
+                Cast: (sc.actorIds || []).map((id) => (actors.find((a) => a.id === id) || {}).name).filter(Boolean).join('; '),
+                Notes: sc.notes || '',
+              }))
+            )
+          }
+        />
       </div>
 
       {addingAct ? (
