@@ -329,3 +329,60 @@ create policy "org members can delete their scripts"
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on orgs, org_members, shows, people, calls, inventory_items, cues, org_settings to authenticated;
 
+-- =============================================================================
+-- create_org() — atomic company creation
+-- =============================================================================
+-- Why this exists:
+--
+-- Creating a company used to be two client-side writes:
+--
+--   supabase.from('orgs').insert({ name }).select().single()
+--   supabase.from('org_members').insert({ org_id, user_id, role: 'admin' })
+--
+-- The first one always failed with:
+--
+--   new row violates row-level security policy for table "orgs"  (42501)
+--
+-- ...even though the INSERT policy (auth.uid() is not null) was correct and
+-- auth.uid() resolved fine. The culprit is `.select()`: it sends
+-- `Prefer: return=representation`, and when an INSERT has a RETURNING clause
+-- Postgres also applies the table's SELECT policy to the new row. That policy
+-- is `is_org_member(id)` — and at that instant you are not yet a member of the
+-- org you are creating, because the org_members row is written next. Postgres
+-- reports that as the same generic "new row violates row-level security
+-- policy" message, which points at the INSERT policy and sends you hunting in
+-- the wrong place.
+--
+-- Inserting without RETURNING succeeds, but then you have no id to insert the
+-- membership with. Hence: do both writes in one SECURITY DEFINER function,
+-- which runs as the owner and is not subject to those policies. It is also
+-- genuinely more correct — an org and its first admin are one unit of work,
+-- and a client-side pair can leave an orphaned, memberless org if the second
+-- insert fails.
+-- =============================================================================
+
+create or replace function create_org(org_name text)
+returns orgs
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_org orgs;
+begin
+  -- SECURITY DEFINER bypasses RLS, so the auth check has to be explicit here.
+  if auth.uid() is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  insert into orgs (name) values (org_name) returning * into new_org;
+
+  insert into org_members (org_id, user_id, role)
+    values (new_org.id, auth.uid(), 'admin');
+
+  return new_org;
+end $$;
+
+-- Only signed-in users. `anon` must not be able to call this.
+revoke execute on function create_org(text) from public;
+grant execute on function create_org(text) to authenticated;
