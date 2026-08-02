@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, Volume2, Package, Shirt, ClipboardList, Phone, Mail, Link2, Battery, AlertTriangle, Check, MapPin, Layers, RotateCcw, ChevronDown, ChevronUp, Star, Repeat, Copy, Megaphone, Briefcase, Music, Mic, Pencil, Radio, Bell, CalendarDays, Footprints, Video, Map, Maximize2, Wrench, DollarSign, Box, UserCheck, UserX, Clapperboard, Upload, Download, Crosshair, FileText } from 'lucide-react';
+import { Building2, LogOut, LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, Volume2, Package, Shirt, ClipboardList, Phone, Mail, Link2, Battery, AlertTriangle, Check, MapPin, Layers, RotateCcw, ChevronDown, ChevronUp, Star, Repeat, Copy, Megaphone, Briefcase, Music, Mic, Pencil, Radio, Bell, CalendarDays, Footprints, Video, Map, Maximize2, Wrench, DollarSign, Box, UserCheck, UserX, Clapperboard, Upload, Download, Crosshair, FileText } from 'lucide-react';
 // Requires two extra dependencies not used elsewhere in this file:
 //   npm install pdfjs-dist pdf-lib
 // pdfjs-dist renders the uploaded script to a canvas so cues can be placed
@@ -8955,7 +8955,22 @@ function ShowSwitcher({ shows, currentShowId, setCurrentShowId }) {
   );
 }
 
-function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId }) {
+function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany }) {
+  // Bottom-of-rail actions: leaving this company, and leaving the app entirely.
+  const footerButton = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '9px 10px',
+    borderRadius: 3,
+    border: 'none',
+    background: 'transparent',
+    color: COLOR.textMuted,
+    cursor: 'pointer',
+    textAlign: 'left',
+    borderLeft: '2px solid transparent',
+    width: '100%',
+  };
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
     { id: 'schedule', label: 'Schedule', icon: CalendarDays },
@@ -9007,7 +9022,20 @@ function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId }) 
             <span className="td-body" style={{ fontSize: 13 }}>{item.label}</span>
           </button>
         );
-      })}
+        })}
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
+          <button onClick={onChangeCompany} className="td-focusable" style={footerButton}>
+            <Building2 size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>Change company</span>
+          </button>
+          <button onClick={onSignOut} className="td-focusable" style={footerButton}>
+            <LogOut size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>Sign out</span>
+          </button>
+        </div>
     </div>
   );
 }
@@ -9100,7 +9128,7 @@ function NoShowSelected({ shows, setCurrentShowId, label }) {
   );
 }
 
-export default function TechDeskDashboard({ orgId, onSignOut }) {
+export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany }) {
   const [editingShowId, setEditingShowId] = useState(null);
   const [active, setActive] = useState('dashboard');
   const [shows, setShows] = useState(seedShows);
@@ -9468,7 +9496,7 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: COLOR.void }}>
       {FONTS}
-      <Sidebar active={active} setActive={setActive} shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} />
+      <Sidebar active={active} setActive={setActive} shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} onSignOut={onSignOut} onChangeCompany={onChangeCompany} />
 
       <div style={{ flex: 1, padding: '24px 32px', overflowY: 'auto' }} className="td-scrollbar">
         {/* Header */}
