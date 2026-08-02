@@ -90,10 +90,17 @@ export default function Auth({ onReady }) {
       if (userErr || !userData?.user) {
         throw new Error('Your session isn\u2019t valid anymore — sign out and sign back in, then try again.');
       }
-      const { data: org, error: orgErr } = await supabase.from('orgs').insert({ name: newOrgName.trim() }).select().single();
+      // One call to a SECURITY DEFINER function that creates the org and the
+      // admin membership together — see supabase/schema.sql. This can't be two
+      // client-side inserts: `.select()` on the org insert makes Postgres apply
+      // the table's SELECT policy (is_org_member) to the brand-new row, and you
+      // aren't a member yet at that instant, so RLS rejects it with a message
+      // that blames the INSERT policy. Doing both writes server-side also means
+      // a company can never end up existing with nobody able to see it.
+      const { data, error: orgErr } = await supabase.rpc('create_org', { org_name: newOrgName.trim() });
       if (orgErr) throw orgErr;
-      const { error: memErr } = await supabase.from('org_members').insert({ org_id: org.id, user_id: userData.user.id, role: 'admin' });
-      if (memErr) throw memErr;
+      const org = Array.isArray(data) ? data[0] : data;
+      if (!org?.id) throw new Error('Company was not created — please try again.');
       onReady(org.id);
     } catch (err) {
       setError(err.message || 'Could not create the company.');
