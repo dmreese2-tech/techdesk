@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Boxes, Briefcase, Check, ClipboardList, Copy, Layers, MapPin, Music, Pencil, Plus, RotateCcw, Star, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { MembersPanel } from './Shell.jsx';
-import { PositionsPanel } from './ShowSetup.jsx';
+import { PositionsPanel } from './Positions.jsx';
 
 // SETTINGS — venues, storage locations, instruments, positions and every
 // category taxonomy that feeds the pickers elsewhere.

@@ -488,7 +488,7 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and pick what they play. Cast pick from the character list under Scenes; band and staff pick from the position lists in Settings." />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and pick what they play. Cast pick from the character list under Characters; band and staff pick from the position lists in Settings." />
         </div>
       )}
 

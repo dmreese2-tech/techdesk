@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
+import { Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { STATUS_META } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
@@ -257,6 +257,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
     { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
     { id: 'schedule', label: 'Schedule', icon: CalendarDays },
     { id: 'scenes', label: 'Scenes', icon: Clapperboard },
+    { id: 'characters', label: 'Characters', icon: Drama },
     { id: 'crew', label: 'Crew', icon: Users },
     { id: 'actors', label: 'Actors', icon: Star },
     { id: 'musicians', label: 'Musicians', icon: Music },

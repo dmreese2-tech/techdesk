@@ -106,7 +106,7 @@ export function PropForm({ show, showActors, inventory, locations, characters, i
               }
             }}
           >
-            <option value="">{(characters || []).length ? 'Not tied to a character' : 'No characters yet - add them under Scenes'}</option>
+            <option value="">{(characters || []).length ? 'Not tied to a character' : 'No characters yet - add them under Characters'}</option>
             {(characters || []).map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}

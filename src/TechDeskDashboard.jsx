@@ -16,7 +16,7 @@ import {
   uploadScriptPdf, downloadScriptPdf, deleteScriptPdf,
 } from './persistence.js';
 import { supabase } from './supabaseClient.js';
-import { CharactersPanel, PositionsPanel } from './ShowSetup.jsx';
+import { CharactersPanel } from './Characters.jsx';
 
 // ---------------------------------------------------------------------------
 // PERSISTENCE — two stores, doing two different jobs.
@@ -254,7 +254,7 @@ import {
 // Section ids, kept here so the URL hash can be validated against them. The
 // sidebar builds its own list with labels and icons from the same ids.
 const SECTION_IDS = [
-  'dashboard', 'schedule', 'scenes', 'crew', 'actors', 'musicians', 'staff',
+  'dashboard', 'schedule', 'scenes', 'characters', 'crew', 'actors', 'musicians', 'staff',
   'choreography', 'costumes', 'props', 'calls', 'audio', 'inventory', 'set',
   'runofshow', 'script', 'settings',
 ];
@@ -663,6 +663,12 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           title: `${(currentShow.acts || []).length} Act${(currentShow.acts || []).length === 1 ? '' : 's'}, ${(currentShow.acts || []).reduce((sum, a) => sum + (a.scenes || []).length, 0)} Scenes`,
         }
       : { eyebrow: 'SCENES', title: 'No Show Selected' },
+    characters: currentShow
+      ? {
+          eyebrow: `CHARACTERS — ${currentShow.title.toUpperCase()}`,
+          title: `${(currentShow.characters || []).length} Character${(currentShow.characters || []).length === 1 ? '' : 's'}`,
+        }
+      : { eyebrow: 'CHARACTERS', title: 'No Show Selected' },
     crew: { eyebrow: 'CREW ROSTER', title: `${crew.length} Crew Members` },
     actors: { eyebrow: 'CAST LIST', title: `${actors.length} Cast Members` },
     musicians: { eyebrow: 'THE BAND', title: `${musicians.length} Musicians` },
@@ -760,7 +766,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
                 { label: 'Build your company rosters', target: 'crew', done: crew.length + actors.length + musicians.length + staff.length > 0, note: 'Crew, actors, musicians and staff live at company level once — you assign them to individual shows later.' },
                 { label: 'Create the production', target: 'dashboard', done: shows.length > 0, note: 'New production, with its venue and opening date. Everything below hangs off the show you are working on.' },
                 { label: 'Enter the scene list', target: 'scenes', done: (currentShow?.acts?.length || 0) > 0, note: 'Acts, scenes and musical numbers. Choreography, costumes, props and cues all reference this, so it comes first.' },
-                { label: 'Build the character list', target: 'scenes', done: (currentShow?.characters?.length || 0) > 0, note: 'The roles in the show, ticked into the scenes they appear in. Actors get cast into these, and costumes and props hang off them, so it precedes casting.' },
+                { label: 'Build the character list', target: 'characters', done: (currentShow?.characters?.length || 0) > 0, note: 'The roles in the show, ticked into the scenes they appear in. Actors get cast into these, and costumes and props hang off them, so it precedes casting.' },
                 { label: 'Lay out the schedule', target: 'schedule', done: (currentShow?.schedule?.length || 0) > 0, note: 'Load-in, rehearsals, tech week and strike. Calls are generated from these dates, so schedule before you post calls.' },
                 { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Cast actors into characters; crew, band and staff into positions from Settings. The audio plot and callboard both read these.' },
                 { label: 'Work the design lists', target: 'costumes', done: ((currentShow?.costumes?.length || 0) + (currentShow?.props?.length || 0) + (currentShow?.setPieces?.length || 0)) > 0, note: 'Costumes, props and set pieces — tied to actor and scene, tracked from needs-building through acquired.' },
@@ -888,12 +894,16 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
 
         {active === 'scenes' &&
           (currentShow ? (
-            <>
-              <CharactersPanel show={currentShow} setShows={setShows} />
-              <ScenesModule show={currentShow} actors={actors} setShows={setShows} />
-            </>
+            <ScenesModule show={currentShow} actors={actors} setShows={setShows} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="scene list" />
+          ))}
+
+        {active === 'characters' &&
+          (currentShow ? (
+            <CharactersPanel show={currentShow} setShows={setShows} />
+          ) : (
+            <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="character list" />
           ))}
 
         {active === 'crew' && (
