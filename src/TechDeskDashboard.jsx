@@ -1510,6 +1510,86 @@ function ShowCard({ show, isCurrent, onSetCurrent, onEdit }) {
 // goes through the org_members_list() SECURITY DEFINER function, which only
 // returns rows for an org the caller actually belongs to.
 // ---------------------------------------------------------------------------
+// Section ids, kept here so the URL hash can be validated against them. The
+// sidebar builds its own list with labels and icons from the same ids.
+const SECTION_IDS = [
+  'dashboard', 'schedule', 'scenes', 'crew', 'actors', 'musicians', 'staff',
+  'choreography', 'costumes', 'props', 'calls', 'audio', 'inventory', 'set',
+  'runofshow', 'script', 'settings',
+];
+
+// ---------------------------------------------------------------------------
+// GET STARTED — the order a show actually gets built in. Each step leans on
+// the ones above it: scenes before anything that references a scene, schedule
+// before calls, cast before the audio plot. Steps tick themselves off from
+// real data rather than from a checkbox someone has to remember to tick.
+// ---------------------------------------------------------------------------
+function GetStarted({ steps, onGo, hasShow }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('td-getstarted-collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('td-getstarted-collapsed', next ? '1' : '0');
+      } catch {
+        // Private browsing — collapsing just won't be remembered.
+      }
+      return next;
+    });
+  };
+
+  const doneCount = steps.filter((s) => s.done).length;
+
+  return (
+    <div style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '16px 18px', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div>
+          <div className="td-display" style={{ fontSize: 14, color: COLOR.textPrimary, letterSpacing: '0.05em' }}>Get started</div>
+          <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginTop: 4 }}>
+            Build a show in this order and nothing has to be redone.
+            {hasShow ? '' : ' Create a production below to unlock the show-specific steps.'}
+          </div>
+        </div>
+        <button
+          onClick={toggle}
+          className="td-focusable"
+          style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11, padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          {doneCount}/{steps.length} · {collapsed ? 'Show' : 'Hide'}
+        </button>
+      </div>
+
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 14 }}>
+          {steps.map((step, i) => (
+            <button
+              key={step.label}
+              onClick={() => onGo(step.target)}
+              className="td-focusable"
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 12, background: 'transparent', border: 'none', borderRadius: 3, padding: '8px', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <span className="td-mono" style={{ width: 22, flexShrink: 0, fontSize: 11, color: step.done ? COLOR.green : COLOR.textFaint, paddingTop: 2 }}>
+                {step.done ? '✓' : String(i + 1).padStart(2, '0')}
+              </span>
+              <span style={{ flex: 1 }}>
+                <span className="td-body" style={{ display: 'block', fontSize: 13, color: step.done ? COLOR.textMuted : COLOR.textPrimary }}>{step.label}</span>
+                <span className="td-body" style={{ display: 'block', fontSize: 11.5, color: COLOR.textFaint, marginTop: 2 }}>{step.note}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const [members, setMembers] = useState(null);
   const [me, setMe] = useState(null);
@@ -9130,7 +9210,28 @@ function NoShowSelected({ shows, setCurrentShowId, label }) {
 
 export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany }) {
   const [editingShowId, setEditingShowId] = useState(null);
-  const [active, setActive] = useState('dashboard');
+  // Which section you're on lives in the URL hash, so a refresh — or a bookmark,
+  // or opening a second tab — lands you back where you were instead of dumping
+  // you on the dashboard.
+  const [active, setActive] = useState(() => {
+    const fromHash = window.location.hash.replace('#', '');
+    return SECTION_IDS.includes(fromHash) ? fromHash : 'dashboard';
+  });
+
+  useEffect(() => {
+    if (window.location.hash.replace('#', '') !== active) {
+      window.history.replaceState(null, '', `#${active}`);
+    }
+  }, [active]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const id = window.location.hash.replace('#', '');
+      setActive(SECTION_IDS.includes(id) ? id : 'dashboard');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const [shows, setShows] = useState(seedShows);
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
@@ -9514,6 +9615,25 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
 
         {active === 'dashboard' && (
           <>
+            <GetStarted
+              onGo={setActive}
+              hasShow={!!currentShow}
+              steps={[
+                { label: 'Set up the company', target: 'settings', done: venues.length > 0, note: 'Venues, storage locations, instruments, and the department, cast and cue vocabularies every picker pulls from.' },
+                { label: 'Build your company rosters', target: 'crew', done: crew.length + actors.length + musicians.length + staff.length > 0, note: 'Crew, actors, musicians and staff live at company level once — you assign them to individual shows later.' },
+                { label: 'Create the production', target: 'dashboard', done: shows.length > 0, note: 'New production, with its venue and opening date. Everything below hangs off the show you are working on.' },
+                { label: 'Enter the scene list', target: 'scenes', done: (currentShow?.acts?.length || 0) > 0, note: 'Acts, scenes and musical numbers, with cast per scene. Choreography, costumes, props and cues all reference this, so it comes first.' },
+                { label: 'Lay out the schedule', target: 'schedule', done: (currentShow?.schedule?.length || 0) > 0, note: 'Load-in, rehearsals, tech week and strike. Calls are generated from these dates, so schedule before you post calls.' },
+                { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Per-show roles and departments, pulled from the rosters. The audio plot and callboard both read these.' },
+                { label: 'Work the design lists', target: 'costumes', done: ((currentShow?.costumes?.length || 0) + (currentShow?.props?.length || 0) + (currentShow?.setPieces?.length || 0)) > 0, note: 'Costumes, props and set pieces — tied to actor and scene, tracked from needs-building through acquired.' },
+                { label: 'Stock and pull inventory', target: 'inventory', done: inventory.length > 0, note: 'What the shop owns, what it cost, and which show has it. Tech-week overlaps between productions get flagged.' },
+                { label: 'Post calls to the callboard', target: 'calls', done: calls.some((c) => c.showId === currentShow?.id), note: 'Who is called when, which scenes are being worked, what gear comes out, and who actually turned up.' },
+                { label: 'Upload the script', target: 'script', done: !!currentShow?.script, note: 'Then click the page where each cue actually falls, and export an annotated copy.' },
+                { label: 'Build the run of show', target: 'runofshow', done: (cueSheets?.[currentShow?.id]?.length || 0) > 0, note: 'The calling script cue by cue, numbered per department — LX 1 and SND 1 are independent.' },
+                { label: 'Check the audio plot', target: 'audio', done: false, note: 'Mic, DI and playback channels, generated from your cast and band assignments. Read it last, once the rest is in.' },
+              ]}
+            />
+
             {/* Controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
