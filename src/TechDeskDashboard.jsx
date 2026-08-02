@@ -181,7 +181,16 @@ const FONTS = (
     .td-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .td-scrollbar::-webkit-scrollbar-thumb { background: ${COLOR.line}; border-radius: 3px; }
 
-    .td-focusable:focus-visible {
+    /* The page itself, not just the app shell — otherwise the browser's default
+           8px body margin leaves a white frame around a full-bleed dark UI. */
+        html, body, #root {
+          margin: 0;
+          padding: 0;
+          min-height: 100%;
+          background: #0B0E11;
+        }
+
+        .td-focusable:focus-visible {
       outline: 2px solid ${COLOR.amber};
       outline-offset: 2px;
     }
@@ -1492,6 +1501,134 @@ function ShowCard({ show, isCurrent, onSetCurrent, onEdit }) {
 // used to be write-once (director, phase, status). Opens from the pencil on a
 // production card.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// MEMBERS — everyone with an account who can sign in and see this company's
+// data. Deliberately separate from the Crew/Actors/Musicians/Staff rosters:
+// those are people you schedule, these are people who log in.
+//
+// Emails live in auth.users, which the client can't read directly, so this
+// goes through the org_members_list() SECURITY DEFINER function, which only
+// returns rows for an org the caller actually belongs to.
+// ---------------------------------------------------------------------------
+function MembersPanel({ orgId, sectionTitle, sectionNote }) {
+  const [members, setMembers] = useState(null);
+  const [me, setMe] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const load = async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    setMe(userData?.user?.id || null);
+    const { data, error: err } = await supabase.rpc('org_members_list', { check_org_id: orgId });
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setError('');
+    setMembers(data || []);
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
+  const admins = (members || []).filter((m) => m.role === 'admin');
+  const iAmAdmin = !!members && members.some((m) => m.user_id === me && m.role === 'admin');
+
+  const changeRole = async (member, role) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('org_members').update({ role }).eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  const removeMember = async (member) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('org_members').delete().eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+        <span className="td-display" style={sectionTitle}>Members</span>
+      </div>
+      <div className="td-body" style={sectionNote}>
+        Everyone with an account on this company. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
+      </div>
+
+      {error && (
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>{error}</div>
+      )}
+
+      {members === null ? (
+        <div className="td-body" style={sectionNote}>Loading…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
+          {members.map((m) => {
+            const isMe = m.user_id === me;
+            const lastAdmin = m.role === 'admin' && admins.length === 1;
+            return (
+              <div
+                key={m.user_id}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px' }}
+              >
+                <span className="td-body" style={{ flex: 1, fontSize: 12.5, color: COLOR.textPrimary }}>
+                  {m.email}{isMe ? ' (you)' : ''}
+                </span>
+                <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
+                  JOINED {new Date(m.joined_at).toLocaleDateString()}
+                </span>
+                {iAmAdmin ? (
+                  <select
+                    className="td-focusable"
+                    value={m.role}
+                    disabled={busyId === m.user_id || lastAdmin}
+                    onChange={(e) => changeRole(m, e.target.value)}
+                    style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '4px 6px' }}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                  </select>
+                ) : (
+                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{m.role.toUpperCase()}</span>
+                )}
+                {iAmAdmin && !isMe && (
+                  <button
+                    className="td-focusable"
+                    disabled={busyId === m.user_id || lastAdmin}
+                    onClick={() => removeMember(m)}
+                    style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 8px', cursor: busyId === m.user_id || lastAdmin ? 'not-allowed' : 'pointer' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {members !== null && admins.length === 1 && (
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint }}>
+          The last admin can't be demoted or removed — promote someone else first.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditShowForm({ show, venues, onSave, onClose }) {
   const [title, setTitle] = useState(show.title || '');
   const [venue, setVenue] = useState(show.venue || venues[0] || 'Mainstage');
@@ -4770,22 +4907,20 @@ function SettingsModule({
         </div>
       </div>
 
-      {/* Persistence */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Check size={14} color={persistenceError ? COLOR.amber : COLOR.green} strokeWidth={1.75} />
-          <span className="td-display" style={sectionTitle}>Saving</span>
+        {/* Persistence */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Check size={14} color={persistenceError ? COLOR.amber : COLOR.green} strokeWidth={1.75} />
+            <span className="td-display" style={sectionTitle}>
+              Saving{lastSavedAt ? ` — last saved ${lastSavedAt.toLocaleTimeString()}` : ''}
+            </span>
+          </div>
+          {persistenceError && (
+            <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>
+              Couldn't reach the database — recent changes may not have been saved. Check your connection; the app keeps retrying as you work.
+            </div>
+          )}
         </div>
-        {persistenceError ? (
-          <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>
-            This browser couldn't save changes locally (private browsing and some browser settings block this). Everything still works, but it won't be here after you close the tab.
-          </div>
-        ) : (
-          <div className="td-body" style={sectionNote}>
-            Changes save automatically to this browser as you work{lastSavedAt ? ` — last saved ${lastSavedAt.toLocaleTimeString()}` : ''}. This is local to this browser only: it doesn't sync to another device, and clearing browser data clears it too.
-          </div>
-        )}
-      </div>
 
       {/* Data */}
       <div>
@@ -4842,7 +4977,10 @@ function SettingsModule({
         )}
       </div>
 
-      {/* Company */}
+      {/* Members */}
+        <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
+
+        {/* Company */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />

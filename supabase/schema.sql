@@ -386,3 +386,32 @@ end $$;
 -- Only signed-in users. `anon` must not be able to call this.
 revoke execute on function create_org(text) from public;
 grant execute on function create_org(text) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- MEMBERS — listing who actually belongs to a company. Emails live in
+-- auth.users, which the anon/authenticated roles can't read, so a client-side
+-- query can only ever see bare user_ids. This function joins the two and
+-- returns rows only when the caller is themselves a member of the org being
+-- asked about — security definer means the guard has to be explicit.
+-- ---------------------------------------------------------------------------
+create or replace function org_members_list(check_org_id uuid)
+returns table (user_id uuid, email text, role text, joined_at timestamptz)
+language sql
+security definer
+set search_path = public
+as $$
+  select m.user_id, u.email::text, m.role, m.created_at
+  from org_members m
+  join auth.users u on u.id = m.user_id
+  where m.org_id = check_org_id and is_org_member(check_org_id)
+  order by m.created_at
+$$;
+
+revoke execute on function org_members_list(uuid) from public;
+grant execute on function org_members_list(uuid) to authenticated;
+
+-- Promoting and demoting. The insert and delete policies above let an admin
+-- add and remove people; without this one they can't change anyone's role.
+create policy "admins can update members" on org_members
+  for update using (is_org_admin(org_id)) with check (is_org_admin(org_id));
