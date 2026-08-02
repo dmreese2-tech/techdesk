@@ -65,7 +65,7 @@ $$;
 -- SHOWS
 -- ---------------------------------------------------------------------------
 create table if not exists shows (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
   title text not null,
   venue text,
@@ -95,7 +95,7 @@ create index if not exists shows_org_id_idx on shows(org_id);
 -- discriminator instead of four near-identical tables.
 -- ---------------------------------------------------------------------------
 create table if not exists people (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
   kind text not null check (kind in ('crew', 'actor', 'staff', 'musician')),
   name text not null,
@@ -112,9 +112,9 @@ create index if not exists people_kind_idx on people(org_id, kind);
 -- CALLS
 -- ---------------------------------------------------------------------------
 create table if not exists calls (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
-  show_id uuid not null references shows(id) on delete cascade,
+  show_id text not null references shows(id) on delete cascade,
   call_date date not null,
   call_time text not null,
   label text not null,
@@ -131,7 +131,7 @@ create index if not exists calls_show_id_idx on calls(show_id);
 -- INVENTORY
 -- ---------------------------------------------------------------------------
 create table if not exists inventory_items (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
   asset_no text,
   name text not null,
@@ -154,9 +154,9 @@ create index if not exists inventory_items_org_id_idx on inventory_items(org_id)
 -- during a show and benefits from row-level updates + realtime.
 -- ---------------------------------------------------------------------------
 create table if not exists cues (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key default gen_random_uuid()::text,
   org_id uuid not null references orgs(id) on delete cascade,
-  show_id uuid not null references shows(id) on delete cascade,
+  show_id text not null references shows(id) on delete cascade,
   num int not null,
   dept text not null,
   description text,
@@ -329,3 +329,89 @@ create policy "org members can delete their scripts"
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on orgs, org_members, shows, people, calls, inventory_items, cues, org_settings to authenticated;
 
+-- =============================================================================
+-- create_org() — atomic company creation
+-- =============================================================================
+-- Why this exists:
+--
+-- Creating a company used to be two client-side writes:
+--
+--   supabase.from('orgs').insert({ name }).select().single()
+--   supabase.from('org_members').insert({ org_id, user_id, role: 'admin' })
+--
+-- The first one always failed with:
+--
+--   new row violates row-level security policy for table "orgs"  (42501)
+--
+-- ...even though the INSERT policy (auth.uid() is not null) was correct and
+-- auth.uid() resolved fine. The culprit is `.select()`: it sends
+-- `Prefer: return=representation`, and when an INSERT has a RETURNING clause
+-- Postgres also applies the table's SELECT policy to the new row. That policy
+-- is `is_org_member(id)` — and at that instant you are not yet a member of the
+-- org you are creating, because the org_members row is written next. Postgres
+-- reports that as the same generic "new row violates row-level security
+-- policy" message, which points at the INSERT policy and sends you hunting in
+-- the wrong place.
+--
+-- Inserting without RETURNING succeeds, but then you have no id to insert the
+-- membership with. Hence: do both writes in one SECURITY DEFINER function,
+-- which runs as the owner and is not subject to those policies. It is also
+-- genuinely more correct — an org and its first admin are one unit of work,
+-- and a client-side pair can leave an orphaned, memberless org if the second
+-- insert fails.
+-- =============================================================================
+
+create or replace function create_org(org_name text)
+returns orgs
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_org orgs;
+begin
+  -- SECURITY DEFINER bypasses RLS, so the auth check has to be explicit here.
+  if auth.uid() is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  insert into orgs (name) values (org_name) returning * into new_org;
+
+  insert into org_members (org_id, user_id, role)
+    values (new_org.id, auth.uid(), 'admin');
+
+  return new_org;
+end $$;
+
+-- Only signed-in users. `anon` must not be able to call this.
+revoke execute on function create_org(text) from public;
+grant execute on function create_org(text) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- MEMBERS — listing who actually belongs to a company. Emails live in
+-- auth.users, which the anon/authenticated roles can't read, so a client-side
+-- query can only ever see bare user_ids. This function joins the two and
+-- returns rows only when the caller is themselves a member of the org being
+-- asked about — security definer means the guard has to be explicit.
+-- ---------------------------------------------------------------------------
+create or replace function org_members_list(check_org_id uuid)
+returns table (user_id uuid, email text, role text, joined_at timestamptz)
+language sql
+security definer
+set search_path = public
+as $$
+  select m.user_id, u.email::text, m.role, m.created_at
+  from org_members m
+  join auth.users u on u.id = m.user_id
+  where m.org_id = check_org_id and is_org_member(check_org_id)
+  order by m.created_at
+$$;
+
+revoke execute on function org_members_list(uuid) from public;
+grant execute on function org_members_list(uuid) to authenticated;
+
+-- Promoting and demoting. The insert and delete policies above let an admin
+-- add and remove people; without this one they can't change anyone's role.
+create policy "admins can update members" on org_members
+  for update using (is_org_admin(org_id)) with check (is_org_admin(org_id));

@@ -15,7 +15,7 @@ const buttonStyle = { background: COLOR.amber, color: COLOR.void, border: 'none'
  * one org before handing control to the real app. Calls onReady(orgId)
  * once both are true.
  */
-export default function Auth({ onReady }) {
+export default function Auth({ onReady, forcePicker = false }) {
   const [session, setSession] = useState(undefined); // undefined = still checking
   const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
   const [email, setEmail] = useState('');
@@ -27,6 +27,9 @@ export default function Auth({ onReady }) {
   const [orgMode, setOrgMode] = useState('create'); // 'create' | 'join'
   const [newOrgName, setNewOrgName] = useState('');
   const [joinOrgId, setJoinOrgId] = useState('');
+  // Set when you're adding a company from the picker rather than because you
+  // don't belong to one yet — it swaps the picker for the create/join forms.
+  const [addMode, setAddMode] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -49,7 +52,7 @@ export default function Auth({ onReady }) {
       }
       const list = (data || []).map((row) => ({ id: row.org_id, name: row.orgs?.name || 'Untitled company', role: row.role }));
       setOrgs(list);
-      if (list.length === 1) onReady(list[0].id);
+      if (list.length === 1 && !forcePicker) onReady(list[0].id);
     })();
     return () => {
       cancelled = true;
@@ -82,10 +85,25 @@ export default function Auth({ onReady }) {
     setError('');
     setBusy(true);
     try {
-      const { data: org, error: orgErr } = await supabase.from('orgs').insert({ name: newOrgName.trim() }).select().single();
+      // getSession() only reads what's cached locally and can look valid
+      // even when Supabase's server would reject it. getUser() actually
+      // round-trips to confirm the session is still genuinely good right
+      // now, immediately before the write that depends on it.
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user) {
+        throw new Error('Your session isn\u2019t valid anymore — sign out and sign back in, then try again.');
+      }
+      // One call to a SECURITY DEFINER function that creates the org and the
+      // admin membership together — see supabase/schema.sql. This can't be two
+      // client-side inserts: `.select()` on the org insert makes Postgres apply
+      // the table's SELECT policy (is_org_member) to the brand-new row, and you
+      // aren't a member yet at that instant, so RLS rejects it with a message
+      // that blames the INSERT policy. Doing both writes server-side also means
+      // a company can never end up existing with nobody able to see it.
+      const { data, error: orgErr } = await supabase.rpc('create_org', { org_name: newOrgName.trim() });
       if (orgErr) throw orgErr;
-      const { error: memErr } = await supabase.from('org_members').insert({ org_id: org.id, user_id: session.user.id, role: 'admin' });
-      if (memErr) throw memErr;
+      const org = Array.isArray(data) ? data[0] : data;
+      if (!org?.id) throw new Error('Company was not created — please try again.');
       onReady(org.id);
     } catch (err) {
       setError(err.message || 'Could not create the company.');
@@ -100,11 +118,15 @@ export default function Auth({ onReady }) {
     setError('');
     setBusy(true);
     try {
-      const { error: memErr } = await supabase.from('org_members').insert({ org_id: joinOrgId.trim(), user_id: session.user.id, role: 'member' });
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user) {
+        throw new Error('Your session isn\u2019t valid anymore — sign out and sign back in, then try again.');
+      }
+      const { error: memErr } = await supabase.from('org_members').insert({ org_id: joinOrgId.trim(), user_id: userData.user.id, role: 'member' });
       if (memErr) throw memErr;
       onReady(joinOrgId.trim());
     } catch (err) {
-      setError('Could not join — check the company ID with your TD.');
+      setError(err.message && err.message.includes('valid') ? err.message : 'Could not join — check the company ID with your TD.');
     } finally {
       setBusy(false);
     }
@@ -145,7 +167,7 @@ export default function Auth({ onReady }) {
 
   if (orgs === null) return wrap(<div style={{ color: COLOR.textFaint, textAlign: 'center', fontSize: 12 }}>Loading your companies…</div>);
 
-  if (orgs.length === 0) {
+  if (orgs.length === 0 || addMode) {
     return wrap(
       <div style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 6, padding: 24 }}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -165,6 +187,15 @@ export default function Auth({ onReady }) {
             <button type="submit" disabled={busy} style={{ ...buttonStyle, opacity: busy ? 0.6 : 1 }}>{busy ? 'Joining…' : 'Join company'}</button>
           </form>
         )}
+        {addMode && (
+          <button
+            type="button"
+            onClick={() => setAddMode(false)}
+            style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', display: 'block', marginLeft: 'auto', marginRight: 'auto' }}
+          >
+            Back to your companies
+          </button>
+        )}
         <button type="button" onClick={() => supabase.auth.signOut()} style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', display: 'block', marginLeft: 'auto', marginRight: 'auto' }}>
           Sign out
         </button>
@@ -172,7 +203,8 @@ export default function Auth({ onReady }) {
     );
   }
 
-  // Belongs to 2+ orgs — let them pick which one to work in.
+  // Two or more companies — or you arrived here from "Change company" — so
+  // pick one, or go add another.
   return wrap(
     <div style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 6, padding: 24 }}>
       <div style={{ color: COLOR.textFaint, fontSize: 12, marginBottom: 14 }}>Which company are you working with?</div>
@@ -183,6 +215,20 @@ export default function Auth({ onReady }) {
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        onClick={() => { setOrgMode('create'); setAddMode(true); }}
+        style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', display: 'block', marginLeft: 'auto', marginRight: 'auto' }}
+      >
+        Join or start another company
+      </button>
+      <button
+        type="button"
+        onClick={() => supabase.auth.signOut()}
+        style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, marginTop: 10, cursor: 'pointer', textDecoration: 'underline', display: 'block', marginLeft: 'auto', marginRight: 'auto' }}
+      >
+        Sign out
+      </button>
     </div>
   );
 }

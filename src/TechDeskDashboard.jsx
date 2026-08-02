@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, Volume2, Package, Shirt, ClipboardList, Phone, Mail, Link2, Battery, AlertTriangle, Check, MapPin, Layers, RotateCcw, ChevronDown, ChevronUp, Star, Repeat, Copy, Megaphone, Briefcase, Music, Mic, Pencil, Radio, Bell, CalendarDays, Footprints, Video, Map, Maximize2, Wrench, DollarSign, Box, UserCheck, UserX, Clapperboard, Upload, Download, Crosshair, FileText } from 'lucide-react';
+import { Building2, LogOut, LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, Volume2, Package, Shirt, ClipboardList, Phone, Mail, Link2, Battery, AlertTriangle, Check, MapPin, Layers, RotateCcw, ChevronDown, ChevronUp, Star, Repeat, Copy, Megaphone, Briefcase, Music, Mic, Pencil, Radio, Bell, CalendarDays, Footprints, Video, Map, Maximize2, Wrench, DollarSign, Box, UserCheck, UserX, Clapperboard, Upload, Download, Crosshair, FileText } from 'lucide-react';
 // Requires two extra dependencies not used elsewhere in this file:
 //   npm install pdfjs-dist pdf-lib
 // pdfjs-dist renders the uploaded script to a canvas so cues can be placed
@@ -102,6 +102,15 @@ function deserializeTaxonomy(initialMap, fallbackIcon, labelMap) {
 // deleted server-side. The ref starts at null (not yet seeded) so the very
 // first run right after hydration never mistakes "we just loaded this from
 // the DB" for "everything was just deleted."
+// Locally-originated writes, tracked so the realtime subscription can tell the
+// echo of our own save apart from a genuine edit made somewhere else. Module
+// level rather than a ref: every synced collection in this window shares it.
+const localWrites = { inFlight: 0, lastFinishedAt: 0 };
+const SELF_ECHO_QUIET_MS = 2500;
+function localWriteRecent() {
+  return localWrites.inFlight > 0 || Date.now() - localWrites.lastFinishedAt < SELF_ECHO_QUIET_MS;
+}
+
 function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError) {
   const prevIdsRef = useRef(null);
   useEffect(() => {
@@ -109,6 +118,7 @@ function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSa
     const timeout = setTimeout(() => {
       const currentIds = new Set(items.map(getId));
       const removed = prevIdsRef.current ? [...prevIdsRef.current].filter((id) => !currentIds.has(id)) : [];
+      localWrites.inFlight += 1;
       Promise.resolve()
         .then(() => (removed.length ? deleteFn(removed) : null))
         .then(() => saveFn(items))
@@ -116,7 +126,11 @@ function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSa
           prevIdsRef.current = currentIds;
           setLastSavedAt(new Date());
         })
-        .catch(() => setPersistenceError(true));
+        .catch(() => setPersistenceError(true))
+        .finally(() => {
+          localWrites.inFlight -= 1;
+          localWrites.lastFinishedAt = Date.now();
+        });
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,7 +181,16 @@ const FONTS = (
     .td-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .td-scrollbar::-webkit-scrollbar-thumb { background: ${COLOR.line}; border-radius: 3px; }
 
-    .td-focusable:focus-visible {
+    /* The page itself, not just the app shell — otherwise the browser's default
+           8px body margin leaves a white frame around a full-bleed dark UI. */
+        html, body, #root {
+          margin: 0;
+          padding: 0;
+          min-height: 100%;
+          background: #0B0E11;
+        }
+
+        .td-focusable:focus-visible {
       outline: 2px solid ${COLOR.amber};
       outline-offset: 2px;
     }
@@ -192,8 +215,13 @@ const STATUS_META = {
   dark: { label: 'Struck', color: COLOR.slate, dim: COLOR.slateDim, cls: '' },
 };
 
-const TODAY = new Date('2026-07-25');
-const TODAY_STR = '2026-07-25';
+const TODAY_STR = (() => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+})();
+const TODAY = new Date(TODAY_STR);
+
 
 const seedShows = [
   {
@@ -1348,7 +1376,7 @@ function PhaseRule({ phase }) {
 // ---------------------------------------------------------------------------
 // SHOW CARD
 // ---------------------------------------------------------------------------
-function ShowCard({ show, isCurrent, onSetCurrent }) {
+function ShowCard({ show, isCurrent, onSetCurrent, onEdit }) {
   const meta = STATUS_META[show.status];
   const dtOpen = daysUntil(show.openDate);
   const [hover, setHover] = useState(false);
@@ -1377,6 +1405,17 @@ function ShowCard({ show, isCurrent, onSetCurrent }) {
           </h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          {onEdit && (
+            <button
+              className="td-focusable"
+              onClick={onEdit}
+              title="Edit production"
+              aria-label="Edit production"
+              style={{ background: 'none', border: 'none', padding: 0, marginRight: 2, cursor: 'pointer', color: COLOR.textFaint, display: 'flex' }}
+            >
+              <Pencil size={13} />
+            </button>
+          )}
           <span
             className={meta.cls}
             style={{
@@ -1457,6 +1496,321 @@ function ShowCard({ show, isCurrent, onSetCurrent }) {
 // ---------------------------------------------------------------------------
 // NEW PRODUCTION FORM (inline, minimal)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// EDIT PRODUCTION FORM — the same fields as the add form, plus the three that
+// used to be write-once (director, phase, status). Opens from the pencil on a
+// production card.
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// MEMBERS — everyone with an account who can sign in and see this company's
+// data. Deliberately separate from the Crew/Actors/Musicians/Staff rosters:
+// those are people you schedule, these are people who log in.
+//
+// Emails live in auth.users, which the client can't read directly, so this
+// goes through the org_members_list() SECURITY DEFINER function, which only
+// returns rows for an org the caller actually belongs to.
+// ---------------------------------------------------------------------------
+// Section ids, kept here so the URL hash can be validated against them. The
+// sidebar builds its own list with labels and icons from the same ids.
+const SECTION_IDS = [
+  'dashboard', 'schedule', 'scenes', 'crew', 'actors', 'musicians', 'staff',
+  'choreography', 'costumes', 'props', 'calls', 'audio', 'inventory', 'set',
+  'runofshow', 'script', 'settings',
+];
+
+// ---------------------------------------------------------------------------
+// GET STARTED — the order a show actually gets built in. Each step leans on
+// the ones above it: scenes before anything that references a scene, schedule
+// before calls, cast before the audio plot. Steps tick themselves off from
+// real data rather than from a checkbox someone has to remember to tick.
+// ---------------------------------------------------------------------------
+function GetStarted({ steps, onGo, hasShow }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('td-getstarted-collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('td-getstarted-collapsed', next ? '1' : '0');
+      } catch {
+        // Private browsing — collapsing just won't be remembered.
+      }
+      return next;
+    });
+  };
+
+  const doneCount = steps.filter((s) => s.done).length;
+
+  return (
+    <div style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '16px 18px', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div>
+          <div className="td-display" style={{ fontSize: 14, color: COLOR.textPrimary, letterSpacing: '0.05em' }}>Get started</div>
+          <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginTop: 4 }}>
+            Build a show in this order and nothing has to be redone.
+            {hasShow ? '' : ' Create a production below to unlock the show-specific steps.'}
+          </div>
+        </div>
+        <button
+          onClick={toggle}
+          className="td-focusable"
+          style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11, padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          {doneCount}/{steps.length} · {collapsed ? 'Show' : 'Hide'}
+        </button>
+      </div>
+
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 14 }}>
+          {steps.map((step, i) => (
+            <button
+              key={step.label}
+              onClick={() => onGo(step.target)}
+              className="td-focusable"
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 12, background: 'transparent', border: 'none', borderRadius: 3, padding: '8px', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <span className="td-mono" style={{ width: 22, flexShrink: 0, fontSize: 11, color: step.done ? COLOR.green : COLOR.textFaint, paddingTop: 2 }}>
+                {step.done ? '✓' : String(i + 1).padStart(2, '0')}
+              </span>
+              <span style={{ flex: 1 }}>
+                <span className="td-body" style={{ display: 'block', fontSize: 13, color: step.done ? COLOR.textMuted : COLOR.textPrimary }}>{step.label}</span>
+                <span className="td-body" style={{ display: 'block', fontSize: 11.5, color: COLOR.textFaint, marginTop: 2 }}>{step.note}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MembersPanel({ orgId, sectionTitle, sectionNote }) {
+  const [members, setMembers] = useState(null);
+  const [me, setMe] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const load = async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    setMe(userData?.user?.id || null);
+    const { data, error: err } = await supabase.rpc('org_members_list', { check_org_id: orgId });
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setError('');
+    setMembers(data || []);
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
+  const admins = (members || []).filter((m) => m.role === 'admin');
+  const iAmAdmin = !!members && members.some((m) => m.user_id === me && m.role === 'admin');
+
+  const changeRole = async (member, role) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('org_members').update({ role }).eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  const removeMember = async (member) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('org_members').delete().eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+        <span className="td-display" style={sectionTitle}>Members</span>
+      </div>
+      <div className="td-body" style={sectionNote}>
+        Everyone with an account on this company. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
+      </div>
+
+      {error && (
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>{error}</div>
+      )}
+
+      {members === null ? (
+        <div className="td-body" style={sectionNote}>Loading…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
+          {members.map((m) => {
+            const isMe = m.user_id === me;
+            const lastAdmin = m.role === 'admin' && admins.length === 1;
+            return (
+              <div
+                key={m.user_id}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px' }}
+              >
+                <span className="td-body" style={{ flex: 1, fontSize: 12.5, color: COLOR.textPrimary }}>
+                  {m.email}{isMe ? ' (you)' : ''}
+                </span>
+                <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
+                  JOINED {new Date(m.joined_at).toLocaleDateString()}
+                </span>
+                {iAmAdmin ? (
+                  <select
+                    className="td-focusable"
+                    value={m.role}
+                    disabled={busyId === m.user_id || lastAdmin}
+                    onChange={(e) => changeRole(m, e.target.value)}
+                    style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '4px 6px' }}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                  </select>
+                ) : (
+                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{m.role.toUpperCase()}</span>
+                )}
+                {iAmAdmin && !isMe && (
+                  <button
+                    className="td-focusable"
+                    disabled={busyId === m.user_id || lastAdmin}
+                    onClick={() => removeMember(m)}
+                    style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 8px', cursor: busyId === m.user_id || lastAdmin ? 'not-allowed' : 'pointer' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {members !== null && admins.length === 1 && (
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint }}>
+          The last admin can't be demoted or removed — promote someone else first.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditShowForm({ show, venues, onSave, onClose }) {
+  const [title, setTitle] = useState(show.title || '');
+  const [venue, setVenue] = useState(show.venue || venues[0] || 'Mainstage');
+  const [director, setDirector] = useState(show.director === 'Unassigned' ? '' : show.director || '');
+  const [phase, setPhase] = useState(show.phase || 'design');
+  const [status, setStatus] = useState(show.status || 'standby');
+  const [openDate, setOpenDate] = useState(show.openDate || '');
+
+  const inputStyle = {
+    background: COLOR.void,
+    border: `1px solid ${COLOR.line}`,
+    borderRadius: 3,
+    padding: '8px 10px',
+    color: COLOR.textPrimary,
+    fontSize: 13,
+    width: '100%',
+  };
+  const labelStyle = { fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 5, display: 'block' };
+
+  return (
+    <div style={{ background: COLOR.card, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 18, marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div className="td-display" style={{ fontSize: 14, color: COLOR.textPrimary, letterSpacing: '0.05em' }}>Edit production</div>
+        <button onClick={onClose} className="td-focusable" style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLOR.textFaint }} aria-label="Close">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>TITLE</label>
+          <input className="td-focusable" style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>VENUE</label>
+          <select className="td-focusable" style={inputStyle} value={venue} onChange={(e) => setVenue(e.target.value)}>
+            {(venues.includes(venue) ? venues : [venue, ...venues]).map((v) => (
+              <option key={v}>{v}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>OPENS</label>
+          <input className="td-focusable" type="date" style={inputStyle} value={openDate} onChange={(e) => setOpenDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>DIRECTOR</label>
+          <input className="td-focusable" style={inputStyle} value={director} onChange={(e) => setDirector(e.target.value)} placeholder="Unassigned" />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>PHASE</label>
+          <select className="td-focusable" style={inputStyle} value={phase} onChange={(e) => setPhase(e.target.value)}>
+            {PHASES.map((p) => (
+              <option key={p} value={p}>{PHASE_LABELS[p]}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>STATUS</label>
+          <select className="td-focusable" style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {Object.entries(STATUS_META).map(([key, meta]) => (
+              <option key={key} value={key}>{meta.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <button
+        className="td-focusable"
+        disabled={!title.trim()}
+        onClick={() => {
+          onSave({
+            title: title.trim(),
+            venue,
+            director: director.trim() || 'Unassigned',
+            phase,
+            status,
+            openDate,
+          });
+        }}
+        style={{
+          marginTop: 14,
+          background: title.trim() ? COLOR.amber : COLOR.slateDim,
+          color: title.trim() ? COLOR.void : COLOR.textFaint,
+          border: 'none',
+          borderRadius: 3,
+          padding: '9px 16px',
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: '0.03em',
+          cursor: title.trim() ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Save changes
+      </button>
+    </div>
+  );
+}
+
 function NewShowForm({ venues, onAdd, onClose }) {
   const [title, setTitle] = useState('');
   const [venue, setVenue] = useState(venues[0] || 'Mainstage');
@@ -2294,7 +2648,7 @@ function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserI
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add crew to the company roster first, then assign them to this show and type their position, such as Board Op or Deck Head. Positions are free text for now, so keep the wording consistent across the run." />
         </div>
       )}
 
@@ -3007,7 +3361,7 @@ function CallsModule({ show, venues, calls, setCalls, rosters, currentIds, inven
           </div>
         ) : (
           <div style={{ marginBottom: 24 }}>
-            <StubPanel label="No calls posted for today" />
+            <StubPanel label="No calls posted for today" hint="Calls are built from the schedule. Add rehearsals, tech and performances under Schedule first, then post a call here and fill its slots from your rosters." />
           </div>
         )}
       </div>
@@ -3356,7 +3710,7 @@ function ItemDetailPanel({ item, shows, calls, locations, setInventory, onBack, 
         </div>
       ) : (
         <div style={{ marginBottom: 10 }}>
-          <StubPanel label="General stock — not assigned to a show" />
+          <StubPanel label="General stock — not assigned to a show" hint="Items start as general stock. Open an item and assign it to a production to pull it for a show, and any tech week overlap with another show gets flagged." />
         </div>
       )}
       {assigning ? (
@@ -3405,7 +3759,7 @@ function ItemDetailPanel({ item, shows, calls, locations, setInventory, onBack, 
         </div>
       ) : (
         <div style={{ marginBottom: 10 }}>
-          <StubPanel label="No unit issues logged — everything's presumed good" />
+          <StubPanel label="No unit issues logged — everything's presumed good" hint="An empty log means every unit is presumed good. Mark a unit broken, repaired or retired from the item's unit list and its history builds up here." />
         </div>
       )}
       {addingUnit ? (
@@ -3782,7 +4136,7 @@ function InventoryModule({ show, shows, calls, inventory, setInventory, location
           ))}
         </div>
       ) : (
-        <StubPanel label="Nothing matches this filter" />
+        <StubPanel label="Nothing matches this filter" hint="Nothing matches the current filter. Clear or widen it above. If the list is empty under every filter, add the first entry with the button at the top right." />
       )}
     </div>
   );
@@ -4127,7 +4481,7 @@ function RunOfShowModule({ show, cueSheets, setCueSheets, CUE_DEPTS }) {
           ))}
         </div>
       ) : (
-        <StubPanel label={`No cue sheet posted for ${show.title} yet — add the first cue above`} />
+        <StubPanel label={`No cue sheet posted for ${show.title} yet — add the first cue above`} hint="Build the calling script cue by cue. Numbering is per department, so LX 1 and SND 1 run independently. Once cues exist you can place them on the page under Script." />
       )}
     </div>
   );
@@ -4633,22 +4987,20 @@ function SettingsModule({
         </div>
       </div>
 
-      {/* Persistence */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Check size={14} color={persistenceError ? COLOR.amber : COLOR.green} strokeWidth={1.75} />
-          <span className="td-display" style={sectionTitle}>Saving</span>
+        {/* Persistence */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Check size={14} color={persistenceError ? COLOR.amber : COLOR.green} strokeWidth={1.75} />
+            <span className="td-display" style={sectionTitle}>
+              Saving{lastSavedAt ? ` — last saved ${lastSavedAt.toLocaleTimeString()}` : ''}
+            </span>
+          </div>
+          {persistenceError && (
+            <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>
+              Couldn't reach the database — recent changes may not have been saved. Check your connection; the app keeps retrying as you work.
+            </div>
+          )}
         </div>
-        {persistenceError ? (
-          <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>
-            This browser couldn't save changes locally (private browsing and some browser settings block this). Everything still works, but it won't be here after you close the tab.
-          </div>
-        ) : (
-          <div className="td-body" style={sectionNote}>
-            Changes save automatically to this browser as you work{lastSavedAt ? ` — last saved ${lastSavedAt.toLocaleTimeString()}` : ''}. This is local to this browser only: it doesn't sync to another device, and clearing browser data clears it too.
-          </div>
-        )}
-      </div>
 
       {/* Data */}
       <div>
@@ -4705,7 +5057,10 @@ function SettingsModule({
         )}
       </div>
 
-      {/* Company */}
+      {/* Members */}
+        <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
+
+        {/* Company */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
@@ -5222,7 +5577,7 @@ function PeopleRosterGroups({ people, show, shows, categoryMap, categoryOrder, r
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and type the role or character they play. Roles are free text for now, so keep the spelling consistent across the show." />
         </div>
       )}
 
@@ -5434,7 +5789,7 @@ function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurren
       {people.length > 0 ? (
         <PeopleRosterGroups people={people} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
       ) : (
-        <StubPanel label={`No one on the ${personLabel} list yet`} />
+        <StubPanel label={`No one on the ${personLabel} list yet`} hint="This is the company-wide roster, not a single show. Add people once here, then assign them to individual productions. Removing someone here removes them from every show." />
       )}
     </div>
   );
@@ -5705,7 +6060,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No one on the cast is mic'd yet" />
+        <StubPanel label="No one on the cast is mic'd yet" hint="Mic assignments come from the cast. Assign actors to this show under Actors and give each one a mic channel, and this plot fills itself in." />
       )}
 
       <AudioSectionHeader label="AUDIO CHANNEL PLOT" />
@@ -5716,7 +6071,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No channels assigned yet" />
+        <StubPanel label="No channels assigned yet" hint="Channels are generated from cast and band assignments. Assign your actors and musicians to this show first, then set each one's mic, DI or playback channel." />
       )}
 
       <AudioSectionHeader label="MONITOR MIXES" />
@@ -5731,7 +6086,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No one needs their own monitor mix yet" />
+        <StubPanel label="No one needs their own monitor mix yet" hint="Flag a performer as needing their own monitor mix on their show assignment and they will appear here with that mix." />
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 26, marginBottom: 10 }}>
@@ -5754,7 +6109,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No sound effects logged for this production yet" />
+        <StubPanel label="No sound effects logged for this production yet" hint="Log sound effects here, then place them as SND cues on the Run of Show so the caller has them in running order." />
       )}
     </div>
   );
@@ -6145,7 +6500,7 @@ function ScheduleModule({ show, rosters, onScheduleChange }) {
             )}
           </div>
         ) : (
-          <StubPanel label={`No schedule entries for ${show.title} yet`} />
+          <StubPanel label={`No schedule entries for ${show.title} yet`} hint="Use Add schedule entry, top right, to log load-in, rehearsals, tech week and strike. The callboard builds its calls from these dates, so the schedule comes before Calls." />
         )
       ) : (
         <div>
@@ -6685,7 +7040,7 @@ function ChoreographyModule({ show, actors, setShows }) {
           )}
         </div>
       ) : (
-        <StubPanel label={`No blocking logged for ${show.title} yet`} />
+        <StubPanel label={`No blocking logged for ${show.title} yet`} hint="Build the scene list under Scenes first, then log blocking against a scene here, with notes, reference video links, and click to place stage diagrams." />
       )}
     </div>
   );
@@ -7087,7 +7442,7 @@ function SetModule({ show, inventory, setInventory, locations, setShows, INVENTO
           )}
         </div>
       ) : (
-        <StubPanel label={pieces.length === 0 ? `No set pieces on the build list for ${show.title} yet` : 'Nothing matches this filter'} />
+        <StubPanel label={pieces.length === 0 ? `No set pieces on the build list for ${show.title} yet` : 'Nothing matches this filter'} hint="Enter the scene list first so pieces can be tied to where they are used, then add a piece and compose it from inventory components such as platform tops and legs." />
       )}
     </div>
   );
@@ -7432,7 +7787,7 @@ function CostumesModule({ show, actors, inventory, locations, setShows }) {
           ))}
         </div>
       ) : (
-        <StubPanel label={costumes.length === 0 ? `No costume needs logged for ${show.title} yet` : 'Nothing matches this filter'} />
+        <StubPanel label={costumes.length === 0 ? `No costume needs logged for ${show.title} yet` : 'Nothing matches this filter'} hint="Cast the show first: a costume attaches to an actor and a scene. Track each look from needs to buy or needs to build through to acquired, along with where it lives." />
       )}
     </div>
   );
@@ -7831,7 +8186,7 @@ function PropsModule({ show, actors, inventory, locations, setShows }) {
           ))}
         </div>
       ) : (
-        <StubPanel label={props_.length === 0 ? `No prop needs logged for ${show.title} yet` : 'Nothing matches this filter'} />
+        <StubPanel label={props_.length === 0 ? `No prop needs logged for ${show.title} yet` : 'Nothing matches this filter'} hint="Enter the scene list and cast the show first, then log each prop against the scene it appears in and the actor who handles it. Props can come from inventory, be bought, or be built." />
       )}
     </div>
   );
@@ -8173,7 +8528,7 @@ function ScenesModule({ show, actors, setShows }) {
           />
         ))
       ) : (
-        <StubPanel label={`No acts set up for ${show.title} yet`} />
+        <StubPanel label={`No acts set up for ${show.title} yet`} hint="Add an act, then the scenes and musical numbers inside it, with the cast in each. Choreography, costumes, props and cue placements all point back at this list, so entering it early saves relinking later." />
       )}
     </div>
   );
@@ -8560,7 +8915,7 @@ function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
             })}
           </div>
         ) : (
-          <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" />
+          <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" hint="Cues are created on Run of Show. Once they exist, come back here to place each one on the actual script page and export an annotated copy for the book." />
         )}
       </div>
     </div>
@@ -8680,7 +9035,22 @@ function ShowSwitcher({ shows, currentShowId, setCurrentShowId }) {
   );
 }
 
-function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId }) {
+function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany }) {
+  // Bottom-of-rail actions: leaving this company, and leaving the app entirely.
+  const footerButton = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '9px 10px',
+    borderRadius: 3,
+    border: 'none',
+    background: 'transparent',
+    color: COLOR.textMuted,
+    cursor: 'pointer',
+    textAlign: 'left',
+    borderLeft: '2px solid transparent',
+    width: '100%',
+  };
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
     { id: 'schedule', label: 'Schedule', icon: CalendarDays },
@@ -8732,29 +9102,53 @@ function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId }) 
             <span className="td-body" style={{ fontSize: 13 }}>{item.label}</span>
           </button>
         );
-      })}
+        })}
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
+          <button onClick={onChangeCompany} className="td-focusable" style={footerButton}>
+            <Building2 size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>Change company</span>
+          </button>
+          <button onClick={onSignOut} className="td-focusable" style={footerButton}>
+            <LogOut size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>Sign out</span>
+          </button>
+        </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// STUB PANEL for not-yet-built modules
+// EMPTY PANEL — what a section shows before anything has been entered into it.
+// Every module here is built and talking to Supabase, so "empty" means nobody
+// has added a row yet. Say that, and say how to add one, rather than implying
+// the feature is missing.
 // ---------------------------------------------------------------------------
-function StubPanel({ label }) {
+const EMPTY_HINT =
+  'Nothing here yet. Use the add button at the top right of this section to create the first entry — or open Get started on the Dashboard, which lays out the order a show gets built in so nothing has to be redone.';
+
+function StubPanel({ label, hint }) {
+  const guidance = hint || EMPTY_HINT;
   return (
     <div
+      title={guidance}
       style={{
         border: `1px dashed ${COLOR.line}`,
         borderRadius: 4,
-        padding: '60px 24px',
+        padding: '52px 24px',
         textAlign: 'center',
       }}
     >
       <div className="td-display" style={{ color: COLOR.textFaint, fontSize: 22, letterSpacing: '0.05em' }}>
-        {label} — under construction
+        {label}
       </div>
-      <div className="td-body" style={{ color: COLOR.textFaint, fontSize: 13, marginTop: 8 }}>
-        This module isn't wired up yet. It'll plug into the same show data as the dashboard.
+      <div
+        className="td-body"
+        style={{ color: COLOR.textMuted, fontSize: 13, marginTop: 10, maxWidth: 620, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.55 }}
+      >
+        {guidance}
       </div>
     </div>
   );
@@ -8789,7 +9183,7 @@ function HouseClock() {
 function NoShowSelected({ shows, setCurrentShowId, label }) {
   return (
     <div>
-      <StubPanel label={`Select a show to view its ${label}`} />
+      <StubPanel label={`Select a show to view its ${label}`} hint="Pick a production from the switcher at the top of the sidebar, or create one on the Dashboard. Everything except the company rosters and Settings is scoped to one show." />
       {shows.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16, maxWidth: 420 }}>
           {shows.map((s) => {
@@ -8825,8 +9219,30 @@ function NoShowSelected({ shows, setCurrentShowId, label }) {
   );
 }
 
-export default function TechDeskDashboard({ orgId, onSignOut }) {
-  const [active, setActive] = useState('dashboard');
+export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany }) {
+  const [editingShowId, setEditingShowId] = useState(null);
+  // Which section you're on lives in the URL hash, so a refresh — or a bookmark,
+  // or opening a second tab — lands you back where you were instead of dumping
+  // you on the dashboard.
+  const [active, setActive] = useState(() => {
+    const fromHash = window.location.hash.replace('#', '');
+    return SECTION_IDS.includes(fromHash) ? fromHash : 'dashboard';
+  });
+
+  useEffect(() => {
+    if (window.location.hash.replace('#', '') !== active) {
+      window.history.replaceState(null, '', `#${active}`);
+    }
+  }, [active]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const id = window.location.hash.replace('#', '');
+      setActive(SECTION_IDS.includes(id) ? id : 'dashboard');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const [shows, setShows] = useState(seedShows);
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
@@ -8920,9 +9336,18 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
   // and replace local state. Simple "go get the truth again" rather than
   // patching individual fields client-side, which is much easier to get
   // subtly wrong against nested JSONB.
+  //
+  // Supabase also delivers the echo of our OWN writes here, and a wholesale
+  // replace on that echo silently eats any edit made between the local patch
+  // and the debounced save landing: you change one field, the refetch puts
+  // the pre-edit row back, and the save that follows writes the reverted
+  // copy — updated_at moves, the value doesn't. So skip the refetch while a
+  // local save is in flight or has just finished, and re-arm it for after
+  // the quiet period so a genuine edit from another device still lands.
   useEffect(() => {
     if (!hydrated) return undefined;
-    const unsubscribe = subscribeToOrgChanges(orgId, () => {
+    let retry;
+    const refetch = () => {
       loadOrgData(orgId)
         .then((data) => {
           setShows(data.shows);
@@ -8935,8 +9360,19 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
           setCueSheets(data.cueSheets);
         })
         .catch(() => setPersistenceError(true));
+    };
+    const unsubscribe = subscribeToOrgChanges(orgId, () => {
+      if (localWriteRecent()) {
+        clearTimeout(retry);
+        retry = setTimeout(refetch, SELF_ECHO_QUIET_MS);
+        return;
+      }
+      refetch();
     });
-    return unsubscribe;
+    return () => {
+      clearTimeout(retry);
+      unsubscribe();
+    };
   }, [hydrated, orgId]);
 
   // Per-device session state (not shared) — still IndexedDB, still debounced.
@@ -9172,7 +9608,7 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: COLOR.void }}>
       {FONTS}
-      <Sidebar active={active} setActive={setActive} shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} />
+      <Sidebar active={active} setActive={setActive} shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} onSignOut={onSignOut} onChangeCompany={onChangeCompany} />
 
       <div style={{ flex: 1, padding: '24px 32px', overflowY: 'auto' }} className="td-scrollbar">
         {/* Header */}
@@ -9190,6 +9626,25 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
 
         {active === 'dashboard' && (
           <>
+            <GetStarted
+              onGo={setActive}
+              hasShow={!!currentShow}
+              steps={[
+                { label: 'Set up the company', target: 'settings', done: venues.length > 0, note: 'Venues, storage locations, instruments, and the department, cast and cue vocabularies every picker pulls from.' },
+                { label: 'Build your company rosters', target: 'crew', done: crew.length + actors.length + musicians.length + staff.length > 0, note: 'Crew, actors, musicians and staff live at company level once — you assign them to individual shows later.' },
+                { label: 'Create the production', target: 'dashboard', done: shows.length > 0, note: 'New production, with its venue and opening date. Everything below hangs off the show you are working on.' },
+                { label: 'Enter the scene list', target: 'scenes', done: (currentShow?.acts?.length || 0) > 0, note: 'Acts, scenes and musical numbers, with cast per scene. Choreography, costumes, props and cues all reference this, so it comes first.' },
+                { label: 'Lay out the schedule', target: 'schedule', done: (currentShow?.schedule?.length || 0) > 0, note: 'Load-in, rehearsals, tech week and strike. Calls are generated from these dates, so schedule before you post calls.' },
+                { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Per-show roles and departments, pulled from the rosters. The audio plot and callboard both read these.' },
+                { label: 'Work the design lists', target: 'costumes', done: ((currentShow?.costumes?.length || 0) + (currentShow?.props?.length || 0) + (currentShow?.setPieces?.length || 0)) > 0, note: 'Costumes, props and set pieces — tied to actor and scene, tracked from needs-building through acquired.' },
+                { label: 'Stock and pull inventory', target: 'inventory', done: inventory.length > 0, note: 'What the shop owns, what it cost, and which show has it. Tech-week overlaps between productions get flagged.' },
+                { label: 'Post calls to the callboard', target: 'calls', done: calls.some((c) => c.showId === currentShow?.id), note: 'Who is called when, which scenes are being worked, what gear comes out, and who actually turned up.' },
+                { label: 'Upload the script', target: 'script', done: !!currentShow?.script, note: 'Then click the page where each cue actually falls, and export an annotated copy.' },
+                { label: 'Build the run of show', target: 'runofshow', done: (cueSheets?.[currentShow?.id]?.length || 0) > 0, note: 'The calling script cue by cue, numbered per department — LX 1 and SND 1 are independent.' },
+                { label: 'Check the audio plot', target: 'audio', done: false, note: 'Mic, DI and playback channels, generated from your cast and band assignments. Read it last, once the rest is in.' },
+              ]}
+            />
+
             {/* Controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -9248,7 +9703,23 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
               />
             )}
 
-            {/* Grid */}
+            {editingShowId && (() => {
+          const editing = shows.find((s) => s.id === editingShowId);
+          if (!editing) return null;
+          return (
+            <EditShowForm
+              show={editing}
+              venues={venues}
+              onSave={(patch) => {
+                setShows((prev) => prev.map((s) => (s.id === editingShowId ? { ...s, ...patch } : s)));
+                setEditingShowId(null);
+              }}
+              onClose={() => setEditingShowId(null)}
+            />
+          );
+        })()}
+
+        {/* Grid */}
             {filtered.length > 0 ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
                 {filtered.map((show) => (
@@ -9256,12 +9727,13 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
                     key={show.id}
                     show={show}
                     isCurrent={show.id === currentShowId}
+              onEdit={() => setEditingShowId(show.id)}
                     onSetCurrent={() => setCurrentShowId(show.id)}
                   />
                 ))}
               </div>
             ) : (
-              <StubPanel label="No productions in this phase" />
+              <StubPanel label="No productions in this phase" hint="No production is in this phase right now. Switch the filter above, or open a production and change its phase from the pencil on its card." />
             )}
 
             {/* Legend */}

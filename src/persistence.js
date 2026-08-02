@@ -35,6 +35,7 @@ function showRowToJs(row) {
     soundEffects: row.sound_effects || [],
     choreography: row.choreography || [],
     acts: row.acts || [],
+    characters: row.characters || [],
     setPieces: row.set_pieces || [],
     costumes: row.costumes || [],
     props: row.props || [],
@@ -58,6 +59,7 @@ function showJsToRow(show, orgId) {
     sound_effects: show.soundEffects || [],
     choreography: show.choreography || [],
     acts: show.acts || [],
+    characters: show.characters || [],
     set_pieces: show.setPieces || [],
     costumes: show.costumes || [],
     props: show.props || [],
@@ -116,11 +118,16 @@ function rowsToCueSheets(rows) {
 const DEFAULT_TAXONOMY_JSON = { departments: {}, departmentOrder: [], castTypes: {}, castTypeOrder: [], staffAreas: {}, staffAreaOrder: [], musicSections: {}, musicSectionOrder: [], inventoryCategories: {}, inventoryCategoryOrder: [], cueDepts: {}, cueDeptOrder: [] };
 
 function settingsRowToJs(row) {
-  if (!row) return { venues: [], locations: [], instruments: [], ...DEFAULT_TAXONOMY_JSON };
+  if (!row) return { venues: [], locations: [], instruments: [], positions: { crew: [], musician: [], staff: [] }, ...DEFAULT_TAXONOMY_JSON };
   return {
     venues: row.venues || [],
     locations: row.locations || [],
     instruments: row.instruments || [],
+    positions: {
+      crew: row.crew_positions || [],
+      musician: row.musician_positions || [],
+      staff: row.staff_positions || [],
+    },
     departments: row.departments || {},
     departmentOrder: row.department_order || [],
     castTypes: row.cast_types || {},
@@ -234,6 +241,9 @@ export async function saveSettings(settings, orgId) {
     venues: settings.venues,
     locations: settings.locations,
     instruments: settings.instruments,
+    crew_positions: settings.positions?.crew || [],
+    musician_positions: settings.positions?.musician || [],
+    staff_positions: settings.positions?.staff || [],
     departments: settings.departments,
     department_order: settings.departmentOrder,
     cast_types: settings.castTypes,
