@@ -102,6 +102,15 @@ function deserializeTaxonomy(initialMap, fallbackIcon, labelMap) {
 // deleted server-side. The ref starts at null (not yet seeded) so the very
 // first run right after hydration never mistakes "we just loaded this from
 // the DB" for "everything was just deleted."
+// Locally-originated writes, tracked so the realtime subscription can tell the
+// echo of our own save apart from a genuine edit made somewhere else. Module
+// level rather than a ref: every synced collection in this window shares it.
+const localWrites = { inFlight: 0, lastFinishedAt: 0 };
+const SELF_ECHO_QUIET_MS = 2500;
+function localWriteRecent() {
+  return localWrites.inFlight > 0 || Date.now() - localWrites.lastFinishedAt < SELF_ECHO_QUIET_MS;
+}
+
 function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError) {
   const prevIdsRef = useRef(null);
   useEffect(() => {
@@ -109,6 +118,7 @@ function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSa
     const timeout = setTimeout(() => {
       const currentIds = new Set(items.map(getId));
       const removed = prevIdsRef.current ? [...prevIdsRef.current].filter((id) => !currentIds.has(id)) : [];
+      localWrites.inFlight += 1;
       Promise.resolve()
         .then(() => (removed.length ? deleteFn(removed) : null))
         .then(() => saveFn(items))
@@ -116,7 +126,11 @@ function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSa
           prevIdsRef.current = currentIds;
           setLastSavedAt(new Date());
         })
-        .catch(() => setPersistenceError(true));
+        .catch(() => setPersistenceError(true))
+        .finally(() => {
+          localWrites.inFlight -= 1;
+          localWrites.lastFinishedAt = Date.now();
+        });
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -9044,9 +9058,18 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
   // and replace local state. Simple "go get the truth again" rather than
   // patching individual fields client-side, which is much easier to get
   // subtly wrong against nested JSONB.
+  //
+  // Supabase also delivers the echo of our OWN writes here, and a wholesale
+  // replace on that echo silently eats any edit made between the local patch
+  // and the debounced save landing: you change one field, the refetch puts
+  // the pre-edit row back, and the save that follows writes the reverted
+  // copy — updated_at moves, the value doesn't. So skip the refetch while a
+  // local save is in flight or has just finished, and re-arm it for after
+  // the quiet period so a genuine edit from another device still lands.
   useEffect(() => {
     if (!hydrated) return undefined;
-    const unsubscribe = subscribeToOrgChanges(orgId, () => {
+    let retry;
+    const refetch = () => {
       loadOrgData(orgId)
         .then((data) => {
           setShows(data.shows);
@@ -9059,8 +9082,19 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
           setCueSheets(data.cueSheets);
         })
         .catch(() => setPersistenceError(true));
+    };
+    const unsubscribe = subscribeToOrgChanges(orgId, () => {
+      if (localWriteRecent()) {
+        clearTimeout(retry);
+        retry = setTimeout(refetch, SELF_ECHO_QUIET_MS);
+        return;
+      }
+      refetch();
     });
-    return unsubscribe;
+    return () => {
+      clearTimeout(retry);
+      unsubscribe();
+    };
   }, [hydrated, orgId]);
 
   // Per-device session state (not shared) — still IndexedDB, still debounced.
