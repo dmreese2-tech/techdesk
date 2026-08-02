@@ -192,8 +192,13 @@ const STATUS_META = {
   dark: { label: 'Struck', color: COLOR.slate, dim: COLOR.slateDim, cls: '' },
 };
 
-const TODAY = new Date('2026-07-25');
-const TODAY_STR = '2026-07-25';
+const TODAY_STR = (() => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+})();
+const TODAY = new Date(TODAY_STR);
+
 
 const seedShows = [
   {
@@ -1348,7 +1353,7 @@ function PhaseRule({ phase }) {
 // ---------------------------------------------------------------------------
 // SHOW CARD
 // ---------------------------------------------------------------------------
-function ShowCard({ show, isCurrent, onSetCurrent }) {
+function ShowCard({ show, isCurrent, onSetCurrent, onEdit }) {
   const meta = STATUS_META[show.status];
   const dtOpen = daysUntil(show.openDate);
   const [hover, setHover] = useState(false);
@@ -1377,6 +1382,17 @@ function ShowCard({ show, isCurrent, onSetCurrent }) {
           </h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          {onEdit && (
+            <button
+              className="td-focusable"
+              onClick={onEdit}
+              title="Edit production"
+              aria-label="Edit production"
+              style={{ background: 'none', border: 'none', padding: 0, marginRight: 2, cursor: 'pointer', color: COLOR.textFaint, display: 'flex' }}
+            >
+              <Pencil size={13} />
+            </button>
+          )}
           <span
             className={meta.cls}
             style={{
@@ -1457,6 +1473,113 @@ function ShowCard({ show, isCurrent, onSetCurrent }) {
 // ---------------------------------------------------------------------------
 // NEW PRODUCTION FORM (inline, minimal)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// EDIT PRODUCTION FORM — the same fields as the add form, plus the three that
+// used to be write-once (director, phase, status). Opens from the pencil on a
+// production card.
+// ---------------------------------------------------------------------------
+function EditShowForm({ show, venues, onSave, onClose }) {
+  const [title, setTitle] = useState(show.title || '');
+  const [venue, setVenue] = useState(show.venue || venues[0] || 'Mainstage');
+  const [director, setDirector] = useState(show.director === 'Unassigned' ? '' : show.director || '');
+  const [phase, setPhase] = useState(show.phase || 'design');
+  const [status, setStatus] = useState(show.status || 'standby');
+  const [openDate, setOpenDate] = useState(show.openDate || '');
+
+  const inputStyle = {
+    background: COLOR.void,
+    border: `1px solid ${COLOR.line}`,
+    borderRadius: 3,
+    padding: '8px 10px',
+    color: COLOR.textPrimary,
+    fontSize: 13,
+    width: '100%',
+  };
+  const labelStyle = { fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 5, display: 'block' };
+
+  return (
+    <div style={{ background: COLOR.card, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 18, marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div className="td-display" style={{ fontSize: 14, color: COLOR.textPrimary, letterSpacing: '0.05em' }}>Edit production</div>
+        <button onClick={onClose} className="td-focusable" style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLOR.textFaint }} aria-label="Close">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>TITLE</label>
+          <input className="td-focusable" style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>VENUE</label>
+          <select className="td-focusable" style={inputStyle} value={venue} onChange={(e) => setVenue(e.target.value)}>
+            {(venues.includes(venue) ? venues : [venue, ...venues]).map((v) => (
+              <option key={v}>{v}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>OPENS</label>
+          <input className="td-focusable" type="date" style={inputStyle} value={openDate} onChange={(e) => setOpenDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>DIRECTOR</label>
+          <input className="td-focusable" style={inputStyle} value={director} onChange={(e) => setDirector(e.target.value)} placeholder="Unassigned" />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>PHASE</label>
+          <select className="td-focusable" style={inputStyle} value={phase} onChange={(e) => setPhase(e.target.value)}>
+            {PHASES.map((p) => (
+              <option key={p} value={p}>{PHASE_LABELS[p]}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>STATUS</label>
+          <select className="td-focusable" style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {Object.entries(STATUS_META).map(([key, meta]) => (
+              <option key={key} value={key}>{meta.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <button
+        className="td-focusable"
+        disabled={!title.trim()}
+        onClick={() => {
+          onSave({
+            title: title.trim(),
+            venue,
+            director: director.trim() || 'Unassigned',
+            phase,
+            status,
+            openDate,
+          });
+        }}
+        style={{
+          marginTop: 14,
+          background: title.trim() ? COLOR.amber : COLOR.slateDim,
+          color: title.trim() ? COLOR.void : COLOR.textFaint,
+          border: 'none',
+          borderRadius: 3,
+          padding: '9px 16px',
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: '0.03em',
+          cursor: title.trim() ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Save changes
+      </button>
+    </div>
+  );
+}
+
 function NewShowForm({ venues, onAdd, onClose }) {
   const [title, setTitle] = useState('');
   const [venue, setVenue] = useState(venues[0] || 'Mainstage');
@@ -8826,6 +8949,7 @@ function NoShowSelected({ shows, setCurrentShowId, label }) {
 }
 
 export default function TechDeskDashboard({ orgId, onSignOut }) {
+  const [editingShowId, setEditingShowId] = useState(null);
   const [active, setActive] = useState('dashboard');
   const [shows, setShows] = useState(seedShows);
   const [filter, setFilter] = useState('all');
@@ -9248,7 +9372,23 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
               />
             )}
 
-            {/* Grid */}
+            {editingShowId && (() => {
+          const editing = shows.find((s) => s.id === editingShowId);
+          if (!editing) return null;
+          return (
+            <EditShowForm
+              show={editing}
+              venues={venues}
+              onSave={(patch) => {
+                setShows((prev) => prev.map((s) => (s.id === editingShowId ? { ...s, ...patch } : s)));
+                setEditingShowId(null);
+              }}
+              onClose={() => setEditingShowId(null)}
+            />
+          );
+        })()}
+
+        {/* Grid */}
             {filtered.length > 0 ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
                 {filtered.map((show) => (
@@ -9256,6 +9396,7 @@ export default function TechDeskDashboard({ orgId, onSignOut }) {
                     key={show.id}
                     show={show}
                     isCurrent={show.id === currentShowId}
+              onEdit={() => setEditingShowId(show.id)}
                     onSetCurrent={() => setCurrentShowId(show.id)}
                   />
                 ))}
