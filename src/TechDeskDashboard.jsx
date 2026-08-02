@@ -2648,7 +2648,7 @@ function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserI
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add crew to the company roster first, then assign them to this show and type their position, such as Board Op or Deck Head. Positions are free text for now, so keep the wording consistent across the run." />
         </div>
       )}
 
@@ -3361,7 +3361,7 @@ function CallsModule({ show, venues, calls, setCalls, rosters, currentIds, inven
           </div>
         ) : (
           <div style={{ marginBottom: 24 }}>
-            <StubPanel label="No calls posted for today" />
+            <StubPanel label="No calls posted for today" hint="Calls are built from the schedule. Add rehearsals, tech and performances under Schedule first, then post a call here and fill its slots from your rosters." />
           </div>
         )}
       </div>
@@ -3710,7 +3710,7 @@ function ItemDetailPanel({ item, shows, calls, locations, setInventory, onBack, 
         </div>
       ) : (
         <div style={{ marginBottom: 10 }}>
-          <StubPanel label="General stock — not assigned to a show" />
+          <StubPanel label="General stock — not assigned to a show" hint="Items start as general stock. Open an item and assign it to a production to pull it for a show, and any tech week overlap with another show gets flagged." />
         </div>
       )}
       {assigning ? (
@@ -3759,7 +3759,7 @@ function ItemDetailPanel({ item, shows, calls, locations, setInventory, onBack, 
         </div>
       ) : (
         <div style={{ marginBottom: 10 }}>
-          <StubPanel label="No unit issues logged — everything's presumed good" />
+          <StubPanel label="No unit issues logged — everything's presumed good" hint="An empty log means every unit is presumed good. Mark a unit broken, repaired or retired from the item's unit list and its history builds up here." />
         </div>
       )}
       {addingUnit ? (
@@ -4136,7 +4136,7 @@ function InventoryModule({ show, shows, calls, inventory, setInventory, location
           ))}
         </div>
       ) : (
-        <StubPanel label="Nothing matches this filter" />
+        <StubPanel label="Nothing matches this filter" hint="Nothing matches the current filter. Clear or widen it above. If the list is empty under every filter, add the first entry with the button at the top right." />
       )}
     </div>
   );
@@ -4481,7 +4481,7 @@ function RunOfShowModule({ show, cueSheets, setCueSheets, CUE_DEPTS }) {
           ))}
         </div>
       ) : (
-        <StubPanel label={`No cue sheet posted for ${show.title} yet — add the first cue above`} />
+        <StubPanel label={`No cue sheet posted for ${show.title} yet — add the first cue above`} hint="Build the calling script cue by cue. Numbering is per department, so LX 1 and SND 1 run independently. Once cues exist you can place them on the page under Script." />
       )}
     </div>
   );
@@ -5577,7 +5577,7 @@ function PeopleRosterGroups({ people, show, shows, categoryMap, categoryOrder, r
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and type the role or character they play. Roles are free text for now, so keep the spelling consistent across the show." />
         </div>
       )}
 
@@ -5789,7 +5789,7 @@ function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurren
       {people.length > 0 ? (
         <PeopleRosterGroups people={people} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
       ) : (
-        <StubPanel label={`No one on the ${personLabel} list yet`} />
+        <StubPanel label={`No one on the ${personLabel} list yet`} hint="This is the company-wide roster, not a single show. Add people once here, then assign them to individual productions. Removing someone here removes them from every show." />
       )}
     </div>
   );
@@ -6060,7 +6060,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No one on the cast is mic'd yet" />
+        <StubPanel label="No one on the cast is mic'd yet" hint="Mic assignments come from the cast. Assign actors to this show under Actors and give each one a mic channel, and this plot fills itself in." />
       )}
 
       <AudioSectionHeader label="AUDIO CHANNEL PLOT" />
@@ -6071,7 +6071,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No channels assigned yet" />
+        <StubPanel label="No channels assigned yet" hint="Channels are generated from cast and band assignments. Assign your actors and musicians to this show first, then set each one's mic, DI or playback channel." />
       )}
 
       <AudioSectionHeader label="MONITOR MIXES" />
@@ -6086,7 +6086,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No one needs their own monitor mix yet" />
+        <StubPanel label="No one needs their own monitor mix yet" hint="Flag a performer as needing their own monitor mix on their show assignment and they will appear here with that mix." />
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 26, marginBottom: 10 }}>
@@ -6109,7 +6109,7 @@ function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER, MUSIC
           ))}
         </div>
       ) : (
-        <StubPanel label="No sound effects logged for this production yet" />
+        <StubPanel label="No sound effects logged for this production yet" hint="Log sound effects here, then place them as SND cues on the Run of Show so the caller has them in running order." />
       )}
     </div>
   );
@@ -7040,7 +7040,7 @@ function ChoreographyModule({ show, actors, setShows }) {
           )}
         </div>
       ) : (
-        <StubPanel label={`No blocking logged for ${show.title} yet`} />
+        <StubPanel label={`No blocking logged for ${show.title} yet`} hint="Build the scene list under Scenes first, then log blocking against a scene here, with notes, reference video links, and click to place stage diagrams." />
       )}
     </div>
   );
@@ -7442,7 +7442,7 @@ function SetModule({ show, inventory, setInventory, locations, setShows, INVENTO
           )}
         </div>
       ) : (
-        <StubPanel label={pieces.length === 0 ? `No set pieces on the build list for ${show.title} yet` : 'Nothing matches this filter'} />
+        <StubPanel label={pieces.length === 0 ? `No set pieces on the build list for ${show.title} yet` : 'Nothing matches this filter'} hint="Enter the scene list first so pieces can be tied to where they are used, then add a piece and compose it from inventory components such as platform tops and legs." />
       )}
     </div>
   );
@@ -7787,7 +7787,7 @@ function CostumesModule({ show, actors, inventory, locations, setShows }) {
           ))}
         </div>
       ) : (
-        <StubPanel label={costumes.length === 0 ? `No costume needs logged for ${show.title} yet` : 'Nothing matches this filter'} />
+        <StubPanel label={costumes.length === 0 ? `No costume needs logged for ${show.title} yet` : 'Nothing matches this filter'} hint="Cast the show first: a costume attaches to an actor and a scene. Track each look from needs to buy or needs to build through to acquired, along with where it lives." />
       )}
     </div>
   );
@@ -8186,7 +8186,7 @@ function PropsModule({ show, actors, inventory, locations, setShows }) {
           ))}
         </div>
       ) : (
-        <StubPanel label={props_.length === 0 ? `No prop needs logged for ${show.title} yet` : 'Nothing matches this filter'} />
+        <StubPanel label={props_.length === 0 ? `No prop needs logged for ${show.title} yet` : 'Nothing matches this filter'} hint="Enter the scene list and cast the show first, then log each prop against the scene it appears in and the actor who handles it. Props can come from inventory, be bought, or be built." />
       )}
     </div>
   );
@@ -8915,7 +8915,7 @@ function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
             })}
           </div>
         ) : (
-          <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" />
+          <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" hint="Cues are created on Run of Show. Once they exist, come back here to place each one on the actual script page and export an annotated copy for the book." />
         )}
       </div>
     </div>
@@ -9183,7 +9183,7 @@ function HouseClock() {
 function NoShowSelected({ shows, setCurrentShowId, label }) {
   return (
     <div>
-      <StubPanel label={`Select a show to view its ${label}`} />
+      <StubPanel label={`Select a show to view its ${label}`} hint="Pick a production from the switcher at the top of the sidebar, or create one on the Dashboard. Everything except the company rosters and Settings is scoped to one show." />
       {shows.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16, maxWidth: 420 }}>
           {shows.map((s) => {
@@ -9733,7 +9733,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
                 ))}
               </div>
             ) : (
-              <StubPanel label="No productions in this phase" />
+              <StubPanel label="No productions in this phase" hint="No production is in this phase right now. Switch the filter above, or open a production and change its phase from the pencil on its card." />
             )}
 
             {/* Legend */}
