@@ -237,7 +237,27 @@ export function ShowSwitcher({ shows, currentShowId, setCurrentShowId }) {
     </div>
   );
 }
-export function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany }) {
+// ---------------------------------------------------------------------------
+// NARROW VIEWPORT — phones and most tablets in portrait. Below this the rail
+// stops being a permanent column and becomes a drawer over the content, since
+// 200px of permanent navigation on a 390px screen leaves nothing for the work.
+// ---------------------------------------------------------------------------
+export const NARROW_BREAKPOINT = 900;
+
+export function useIsNarrow() {
+  const query = `(max-width: ${NARROW_BREAKPOINT}px)`;
+  const [narrow, setNarrow] = useState(() => (typeof window === 'undefined' ? false : window.matchMedia(query).matches));
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = (e) => setNarrow(e.matches);
+    setNarrow(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [query]);
+  return narrow;
+}
+
+export function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany, isNarrow, open, onClose }) {
   // Bottom-of-rail actions: leaving this company, and leaving the app entirely.
   const footerButton = {
     display: 'flex',
@@ -274,7 +294,31 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
   return (
-    <div style={{ width: 200, background: COLOR.panel, borderRight: `1px solid ${COLOR.line}`, padding: '20px 12px', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+    <div
+      style={{
+        width: 200,
+        background: COLOR.panel,
+        borderRight: `1px solid ${COLOR.line}`,
+        padding: '20px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        flexShrink: 0,
+        ...(isNarrow
+          ? {
+              position: 'fixed',
+              top: 0,
+              bottom: 0,
+              left: 0,
+              zIndex: 60,
+              overflowY: 'auto',
+              transform: open ? 'translateX(0)' : 'translateX(-100%)',
+              transition: 'transform 0.2s ease',
+              boxShadow: open ? '0 0 24px rgba(0,0,0,0.5)' : 'none',
+            }
+          : {}),
+      }}
+    >
       <div className="td-display" style={{ color: COLOR.textPrimary, fontSize: 16, letterSpacing: '0.08em', padding: '0 10px 16px' }}>
         Tech Desk
       </div>
@@ -285,7 +329,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
         return (
           <button
             key={item.id}
-            onClick={() => setActive(item.id)}
+            onClick={() => { setActive(item.id); if (onClose) onClose(); }}
             className="td-focusable"
             style={{
               display: 'flex',
@@ -310,7 +354,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
         <div style={{ flex: 1 }} />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
-          <button onClick={onChangeCompany} className="td-focusable" style={footerButton}>
+          <button onClick={() => { if (onClose) onClose(); onChangeCompany(); }} className="td-focusable" style={footerButton}>
             <Building2 size={15} strokeWidth={1.75} />
             <span className="td-body" style={{ fontSize: 13 }}>Change company</span>
           </button>

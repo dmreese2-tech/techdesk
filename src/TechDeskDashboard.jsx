@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Building2, LogOut, LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, Volume2, Package, Shirt, ClipboardList, Phone, Mail, Link2, Battery, AlertTriangle, Check, MapPin, Layers, RotateCcw, ChevronDown, ChevronUp, Star, Repeat, Copy, Megaphone, Briefcase, Music, Mic, Pencil, Radio, Bell, CalendarDays, Footprints, Video, Map, Maximize2, Wrench, DollarSign, Box, UserCheck, UserX, Clapperboard, Upload, Download, Crosshair, FileText } from 'lucide-react';
+import { Menu, Building2, LogOut, LayoutGrid, Users, Boxes, ListChecks, Settings, Plus, X, Zap, Hammer, Volume2, Package, Shirt, ClipboardList, Phone, Mail, Link2, Battery, AlertTriangle, Check, MapPin, Layers, RotateCcw, ChevronDown, ChevronUp, Star, Repeat, Copy, Megaphone, Briefcase, Music, Mic, Pencil, Radio, Bell, CalendarDays, Footprints, Video, Map, Maximize2, Wrench, DollarSign, Box, UserCheck, UserX, Clapperboard, Upload, Download, Crosshair, FileText } from 'lucide-react';
 // Requires two extra dependencies not used elsewhere in this file:
 //   npm install pdfjs-dist pdf-lib
 // pdfjs-dist renders the uploaded script to a canvas so cues can be placed
@@ -142,7 +142,7 @@ function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSa
 // DESIGN TOKENS
 // ---------------------------------------------------------------------------
 import { COLOR, FONTS } from './theme.jsx';
-import { Sidebar, HouseClock, NoShowSelected } from './Shell.jsx';
+import { Sidebar, HouseClock, NoShowSelected, useIsNarrow } from './Shell.jsx';
 import { ShowCard, GetStarted, EditShowForm, NewShowForm } from './ProductionBoard.jsx';
 import { ScriptModule } from './Script.jsx';
 import { ScenesModule } from './Scenes.jsx';
@@ -358,6 +358,10 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   }, [active]);
 
   useEffect(() => {
+    if (!isNarrow) setNavOpen(false);
+  }, [isNarrow]);
+
+  useEffect(() => {
     const onHashChange = () => {
       const id = window.location.hash.replace('#', '');
       setActive(SECTION_IDS.includes(id) ? id : 'dashboard');
@@ -383,6 +387,10 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // Company-level job titles for crew, band and staff, so the same position
   // reads the same way on every show instead of being retyped per assignment.
   const [positions, setPositions] = useState({ crew: [], musician: [], staff: [] });
+  // On a phone the rail is a drawer over the content rather than a column
+  // beside it; on a desktop it stays put and this flag is ignored.
+  const isNarrow = useIsNarrow();
+  const [navOpen, setNavOpen] = useState(false);
   const [locations, setLocations] = useState(seedLocations);
   const [instruments, setInstruments] = useState(seedInstruments);
   const [departments, setDepartments] = useState(INITIAL_DEPARTMENTS);
@@ -740,20 +748,52 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: COLOR.void }}>
       {FONTS}
-      <Sidebar active={active} setActive={setActive} shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} onSignOut={onSignOut} onChangeCompany={onChangeCompany} />
+      <Sidebar
+        active={active}
+        setActive={setActive}
+        shows={shows}
+        currentShowId={currentShowId}
+        setCurrentShowId={setCurrentShowId}
+        onSignOut={onSignOut}
+        onChangeCompany={onChangeCompany}
+        isNarrow={isNarrow}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+      />
 
-      <div style={{ flex: 1, padding: '24px 32px', overflowY: 'auto' }} className="td-scrollbar">
+      {isNarrow && navOpen && (
+        <div
+          onClick={() => setNavOpen(false)}
+          aria-hidden="true"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 55 }}
+        />
+      )}
+
+      <div style={{ flex: 1, padding: isNarrow ? '16px 16px 32px' : '24px 32px', overflowY: 'auto', minWidth: 0 }} className="td-scrollbar">
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 26 }}>
-          <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: isNarrow ? 18 : 26, gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+            {isNarrow && (
+              <button
+                onClick={() => setNavOpen(true)}
+                className="td-focusable"
+                aria-label="Open menu"
+                aria-expanded={navOpen}
+                style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, padding: '7px 9px', cursor: 'pointer', display: 'flex', flexShrink: 0 }}
+              >
+                <Menu size={18} />
+              </button>
+            )}
+            <div style={{ minWidth: 0 }}>
             <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em', marginBottom: 6 }}>
               {header.eyebrow}
             </div>
             <h1 className="td-display" style={{ fontSize: 28, color: COLOR.textPrimary, letterSpacing: '0.02em', margin: 0 }}>
               {header.title}
             </h1>
+            </div>
           </div>
-          <HouseClock />
+          {!isNarrow && <HouseClock />}
         </div>
 
         {active === 'dashboard' && (
