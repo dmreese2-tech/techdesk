@@ -6500,7 +6500,7 @@ function ScheduleModule({ show, rosters, onScheduleChange }) {
             )}
           </div>
         ) : (
-          <StubPanel label={`No schedule entries for ${show.title} yet`} />
+          <StubPanel label={`No schedule entries for ${show.title} yet`} hint="Use Add schedule entry, top right, to log load-in, rehearsals, tech week and strike. The callboard builds its calls from these dates, so the schedule comes before Calls." />
         )
       ) : (
         <div>
@@ -8528,7 +8528,7 @@ function ScenesModule({ show, actors, setShows }) {
           />
         ))
       ) : (
-        <StubPanel label={`No acts set up for ${show.title} yet`} />
+        <StubPanel label={`No acts set up for ${show.title} yet`} hint="Add an act, then the scenes and musical numbers inside it, with the cast in each. Choreography, costumes, props and cue placements all point back at this list, so entering it early saves relinking later." />
       )}
     </div>
   );
@@ -9121,23 +9121,34 @@ function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, on
 }
 
 // ---------------------------------------------------------------------------
-// STUB PANEL for not-yet-built modules
+// EMPTY PANEL — what a section shows before anything has been entered into it.
+// Every module here is built and talking to Supabase, so "empty" means nobody
+// has added a row yet. Say that, and say how to add one, rather than implying
+// the feature is missing.
 // ---------------------------------------------------------------------------
-function StubPanel({ label }) {
+const EMPTY_HINT =
+  'Nothing here yet. Use the add button at the top right of this section to create the first entry — or open Get started on the Dashboard, which lays out the order a show gets built in so nothing has to be redone.';
+
+function StubPanel({ label, hint }) {
+  const guidance = hint || EMPTY_HINT;
   return (
     <div
+      title={guidance}
       style={{
         border: `1px dashed ${COLOR.line}`,
         borderRadius: 4,
-        padding: '60px 24px',
+        padding: '52px 24px',
         textAlign: 'center',
       }}
     >
       <div className="td-display" style={{ color: COLOR.textFaint, fontSize: 22, letterSpacing: '0.05em' }}>
-        {label} — under construction
+        {label}
       </div>
-      <div className="td-body" style={{ color: COLOR.textFaint, fontSize: 13, marginTop: 8 }}>
-        This module isn't wired up yet. It'll plug into the same show data as the dashboard.
+      <div
+        className="td-body"
+        style={{ color: COLOR.textMuted, fontSize: 13, marginTop: 10, maxWidth: 620, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.55 }}
+      >
+        {guidance}
       </div>
     </div>
   );
