@@ -358,10 +358,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   }, [active]);
 
   useEffect(() => {
-    if (!isNarrow) setNavOpen(false);
-  }, [isNarrow]);
-
-  useEffect(() => {
     const onHashChange = () => {
       const id = window.location.hash.replace('#', '');
       setActive(SECTION_IDS.includes(id) ? id : 'dashboard');
@@ -391,6 +387,12 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // beside it; on a desktop it stays put and this flag is ignored.
   const isNarrow = useIsNarrow();
   const [navOpen, setNavOpen] = useState(false);
+
+  // Growing the window back past the breakpoint leaves the drawer stranded
+  // open behind a rail that's now permanent, so close it.
+  useEffect(() => {
+    if (!isNarrow) setNavOpen(false);
+  }, [isNarrow]);
   const [locations, setLocations] = useState(seedLocations);
   const [instruments, setInstruments] = useState(seedInstruments);
   const [departments, setDepartments] = useState(INITIAL_DEPARTMENTS);
