@@ -1,0 +1,396 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, Crosshair, Download, FileText, Upload } from 'lucide-react';
+import { COLOR } from './theme.jsx';
+import { cueCode } from './shared.jsx';
+import { StubPanel } from './ui.jsx';
+
+// SCRIPT — the uploaded PDF, click-to-place cue markers on the real page, and
+// the annotated export.
+
+// ---------------------------------------------------------------------------
+// SCRIPT MODULE — upload the show's PDF, click on a page to drop a cue at
+// that spot, export a new PDF with every cue burned onto the page it was
+// placed on. Rendering (pdfjs-dist) and export (pdf-lib) are the only two
+// features in this file that depend on packages outside lucide-react —
+// see the import comment at the top of the file.
+// ---------------------------------------------------------------------------
+export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
+  const script = show.script;
+  const cues = cueSheets[show.id] || [];
+  const [pageNum, setPageNum] = useState(1);
+  const [placingCueId, setPlacingCueId] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [rendering, setRendering] = useState(false);
+  const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // (Re)load the pdfjs document from Storage whenever a different show's
+  // script comes into view. The bytes never live in React state — only
+  // fileName/pageCount/markers do — so this always fetches fresh.
+  useEffect(() => {
+    let cancelled = false;
+    if (!script) {
+      setPdfDoc(null);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const bytes = await downloadScriptPdf(orgId, show.id);
+        const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+        if (!cancelled) {
+          setPdfDoc(doc);
+          setPageNum(1);
+        }
+      } catch (err) {
+        if (!cancelled) setUploadError('Could not load that script from storage.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, show.id, script?.fileName]);
+
+  // Render the current page to the canvas whenever the doc or page changes.
+  useEffect(() => {
+    if (!pdfDoc || !canvasRef.current) return undefined;
+    let cancelled = false;
+    setRendering(true);
+    (async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = canvasRef.current;
+        if (!canvas || cancelled) return;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      } catch (err) {
+        // Page failed to render — leave the previous frame up rather than crash.
+      } finally {
+        if (!cancelled) setRendering(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDoc, pageNum]);
+
+  async function handleUpload(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setUploadError('That file isn\u2019t a PDF.');
+      return;
+    }
+    setUploading(true);
+    setUploadError('');
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      const pageCount = doc.numPages;
+      await uploadScriptPdf(orgId, show.id, file);
+      setShows((prev) =>
+        prev.map((s) => (s.id === show.id ? { ...s, script: { fileName: file.name, pageCount, markers: [] } } : s))
+      );
+    } catch (err) {
+      setUploadError('Could not upload that PDF. Try again.');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function replaceScript() {
+    deleteScriptPdf(orgId, show.id).catch(() => {});
+    setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, script: null } : s)));
+    setPlacingCueId(null);
+  }
+
+  function handleCanvasClick(e) {
+    if (!placingCueId || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const xPct = (e.clientX - rect.left) / rect.width;
+    const yPct = (e.clientY - rect.top) / rect.height;
+    const marker = { id: `mk-${Date.now()}`, cueId: placingCueId, page: pageNum, xPct, yPct };
+    setShows((prev) =>
+      prev.map((s) =>
+        s.id === show.id
+          ? { ...s, script: { ...s.script, markers: [...(s.script.markers || []).filter((m) => m.cueId !== placingCueId), marker] } }
+          : s
+      )
+    );
+    setPlacingCueId(null);
+  }
+
+  function removeMarker(markerId) {
+    setShows((prev) =>
+      prev.map((s) => (s.id === show.id ? { ...s, script: { ...s.script, markers: (s.script.markers || []).filter((m) => m.id !== markerId) } } : s))
+    );
+  }
+
+  async function handleExport() {
+    if (!script) return;
+    setExporting(true);
+    try {
+      const bytes = await downloadScriptPdf(orgId, show.id);
+      const outDoc = await PDFDocument.load(bytes);
+      const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
+      const pages = outDoc.getPages();
+      (script.markers || []).forEach((marker) => {
+        const page = pages[marker.page - 1];
+        if (!page) return;
+        const cue = cues.find((c) => c.id === marker.cueId);
+        const label = cue ? cueCode(cue, CUE_DEPTS) : '?';
+        const { width, height } = page.getSize();
+        const x = marker.xPct * width;
+        const y = height - marker.yPct * height;
+        page.drawCircle({ x, y, size: 9, color: rgb(0.91, 0.64, 0.24), opacity: 0.85 });
+        page.drawText(label, { x: x + 12, y: y - 4, size: 10, font, color: rgb(0.72, 0.47, 0.08) });
+      });
+      const outBytes = await outDoc.save();
+      const blob = new Blob([outBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${show.title.replace(/\s+/g, '_')}_cued_script.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setUploadError('Could not export the annotated script.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const inputStyle = {
+    background: COLOR.void,
+    border: `1px solid ${COLOR.line}`,
+    borderRadius: 3,
+    padding: '7px 12px',
+    color: COLOR.textPrimary,
+    fontSize: 12.5,
+  };
+
+  if (!script) {
+    return (
+      <div>
+        <div
+          style={{
+            border: `1px dashed ${COLOR.lineBright}`,
+            borderRadius: 6,
+            padding: '48px 24px',
+            textAlign: 'center',
+          }}
+        >
+          <FileText size={28} color={COLOR.textFaint} strokeWidth={1.5} style={{ margin: '0 auto 12px' }} />
+          <div className="td-body" style={{ fontSize: 13.5, color: COLOR.textMuted, marginBottom: 4 }}>
+            No script uploaded for {show.title} yet.
+          </div>
+          <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 18 }}>
+            Upload the show's PDF to start placing cues on it.
+          </div>
+          <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleUpload} style={{ display: 'none' }} id="script-upload-input" />
+          <button
+            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+            disabled={uploading}
+            className="td-focusable"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              background: COLOR.amber,
+              color: COLOR.void,
+              border: 'none',
+              borderRadius: 3,
+              padding: '9px 18px',
+              fontSize: 12.5,
+              fontWeight: 700,
+              cursor: uploading ? 'default' : 'pointer',
+              opacity: uploading ? 0.6 : 1,
+            }}
+          >
+            <Upload size={14} /> {uploading ? 'Reading PDF...' : 'Upload script PDF'}
+          </button>
+          {uploadError && (
+            <div className="td-mono" style={{ fontSize: 11, color: COLOR.amber, marginTop: 12 }}>{uploadError}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const markersOnPage = (script.markers || []).filter((m) => m.page === pageNum);
+
+  return (
+    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      <div style={{ flex: '1 1 480px', minWidth: 320 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div className="td-body" style={{ fontSize: 13, color: COLOR.textPrimary, fontWeight: 500 }}>{script.fileName}</div>
+            <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint, marginTop: 2 }}>
+              {(script.markers || []).length} cue{(script.markers || []).length === 1 ? '' : 's'} placed · {script.pageCount} page{script.pageCount === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={replaceScript} className="td-focusable" style={{ background: 'none', border: `1px solid ${COLOR.line}`, color: COLOR.textFaint, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}>
+              Replace script
+            </button>
+            <button
+              onClick={handleExport}
+              disabled={exporting || (script.markers || []).length === 0}
+              className="td-focusable"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: (script.markers || []).length > 0 ? COLOR.amber : COLOR.slateDim,
+                color: (script.markers || []).length > 0 ? COLOR.void : COLOR.textFaint,
+                border: 'none',
+                borderRadius: 3,
+                padding: '7px 14px',
+                fontSize: 11.5,
+                fontWeight: 700,
+                cursor: (script.markers || []).length > 0 && !exporting ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Download size={13} /> {exporting ? 'Exporting...' : 'Export cued script'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <button
+            onClick={() => setPageNum((p) => Math.max(1, p - 1))}
+            disabled={pageNum <= 1}
+            className="td-focusable"
+            style={{ background: 'none', border: `1px solid ${COLOR.line}`, color: pageNum <= 1 ? COLOR.slateDim : COLOR.textMuted, borderRadius: 3, padding: '5px 10px', cursor: pageNum <= 1 ? 'default' : 'pointer' }}
+          >
+            <ChevronUp size={13} style={{ transform: 'rotate(-90deg)' }} />
+          </button>
+          <span className="td-mono" style={{ fontSize: 11.5, color: COLOR.textMuted }}>
+            Page {pageNum} of {script.pageCount}
+          </span>
+          <button
+            onClick={() => setPageNum((p) => Math.min(script.pageCount, p + 1))}
+            disabled={pageNum >= script.pageCount}
+            className="td-focusable"
+            style={{ background: 'none', border: `1px solid ${COLOR.line}`, color: pageNum >= script.pageCount ? COLOR.slateDim : COLOR.textMuted, borderRadius: 3, padding: '5px 10px', cursor: pageNum >= script.pageCount ? 'default' : 'pointer' }}
+          >
+            <ChevronDown size={13} style={{ transform: 'rotate(-90deg)' }} />
+          </button>
+        </div>
+
+        {placingCueId && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: COLOR.amberDim, borderRadius: 4, padding: '8px 12px', marginBottom: 10 }}>
+            <span className="td-mono" style={{ fontSize: 11, color: COLOR.amber, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Crosshair size={12} /> Click the script where {cueCode(cues.find((c) => c.id === placingCueId) || {}, CUE_DEPTS)} calls
+            </span>
+            <button onClick={() => setPlacingCueId(null)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.amber, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        <div style={{ position: 'relative', display: 'inline-block', border: `1px solid ${COLOR.line}`, borderRadius: 4, overflow: 'hidden', maxWidth: '100%' }}>
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            style={{ display: 'block', maxWidth: '100%', height: 'auto', cursor: placingCueId ? 'crosshair' : 'default' }}
+          />
+          {rendering && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(11,14,17,0.6)' }}>
+              <span className="td-mono" style={{ fontSize: 11, color: COLOR.textFaint }}>Rendering page...</span>
+            </div>
+          )}
+          {markersOnPage.map((m) => {
+            const cue = cues.find((c) => c.id === m.cueId);
+            return (
+              <button
+                key={m.id}
+                onClick={() => removeMarker(m.id)}
+                className="td-focusable"
+                title="Click to remove"
+                style={{
+                  position: 'absolute',
+                  left: `${m.xPct * 100}%`,
+                  top: `${m.yPct * 100}%`,
+                  transform: 'translate(-50%, -50%)',
+                  background: COLOR.amber,
+                  color: COLOR.void,
+                  border: `2px solid ${COLOR.void}`,
+                  borderRadius: 20,
+                  padding: '2px 8px',
+                  fontSize: 10,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  cursor: 'pointer',
+                }}
+              >
+                {cue ? cueCode(cue, CUE_DEPTS) : '?'}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ flex: '0 0 260px', minWidth: 220 }}>
+        <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em', marginBottom: 10 }}>
+          CUE SHEET
+        </div>
+        {cues.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {cues.map((cue) => {
+              const marker = (script.markers || []).find((m) => m.cueId === cue.id);
+              return (
+                <div key={cue.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="td-mono" style={{ fontSize: 11, color: COLOR.amber }}>{cueCode(cue, CUE_DEPTS)}</div>
+                    <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cue.desc}</div>
+                  </div>
+                  {marker ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                      <button onClick={() => setPageNum(marker.page)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.green, fontSize: 10, cursor: 'pointer' }}>
+                        p.{marker.page}
+                      </button>
+                      <button onClick={() => removeMarker(marker.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 9.5, cursor: 'pointer', textDecoration: 'underline' }}>
+                        remove
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setPlacingCueId(cue.id)}
+                      className="td-focusable"
+                      style={{
+                        flexShrink: 0,
+                        background: placingCueId === cue.id ? COLOR.amber : 'transparent',
+                        color: placingCueId === cue.id ? COLOR.void : COLOR.amber,
+                        border: `1px solid ${COLOR.amber}`,
+                        borderRadius: 3,
+                        padding: '4px 9px',
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Place
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" hint="Cues are created on Run of Show. Once they exist, come back here to place each one on the actual script page and export an annotated copy for the book." />
+        )}
+      </div>
+    </div>
+  );
+}

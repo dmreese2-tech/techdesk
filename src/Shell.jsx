@@ -1,0 +1,386 @@
+import React, { useEffect, useState } from 'react';
+import { Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
+import { COLOR } from './theme.jsx';
+import { STATUS_META } from './shared.jsx';
+import { StubPanel } from './ui.jsx';
+
+// SHELL — the frame around every section: sidebar rail, show switcher, house
+// clock, the members panel in Settings, and the no-show-selected gate.
+
+export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
+  const [members, setMembers] = useState(null);
+  const [me, setMe] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const load = async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    setMe(userData?.user?.id || null);
+    const { data, error: err } = await supabase.rpc('org_members_list', { check_org_id: orgId });
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setError('');
+    setMembers(data || []);
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
+  const admins = (members || []).filter((m) => m.role === 'admin');
+  const iAmAdmin = !!members && members.some((m) => m.user_id === me && m.role === 'admin');
+
+  const changeRole = async (member, role) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('org_members').update({ role }).eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  const removeMember = async (member) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('org_members').delete().eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+        <span className="td-display" style={sectionTitle}>Members</span>
+      </div>
+      <div className="td-body" style={sectionNote}>
+        Everyone with an account on this company. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
+      </div>
+
+      {error && (
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>{error}</div>
+      )}
+
+      {members === null ? (
+        <div className="td-body" style={sectionNote}>Loading…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
+          {members.map((m) => {
+            const isMe = m.user_id === me;
+            const lastAdmin = m.role === 'admin' && admins.length === 1;
+            return (
+              <div
+                key={m.user_id}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px' }}
+              >
+                <span className="td-body" style={{ flex: 1, fontSize: 12.5, color: COLOR.textPrimary }}>
+                  {m.email}{isMe ? ' (you)' : ''}
+                </span>
+                <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
+                  JOINED {new Date(m.joined_at).toLocaleDateString()}
+                </span>
+                {iAmAdmin ? (
+                  <select
+                    className="td-focusable"
+                    value={m.role}
+                    disabled={busyId === m.user_id || lastAdmin}
+                    onChange={(e) => changeRole(m, e.target.value)}
+                    style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '4px 6px' }}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                  </select>
+                ) : (
+                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{m.role.toUpperCase()}</span>
+                )}
+                {iAmAdmin && !isMe && (
+                  <button
+                    className="td-focusable"
+                    disabled={busyId === m.user_id || lastAdmin}
+                    onClick={() => removeMember(m)}
+                    style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 8px', cursor: busyId === m.user_id || lastAdmin ? 'not-allowed' : 'pointer' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {members !== null && admins.length === 1 && (
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint }}>
+          The last admin can't be demoted or removed — promote someone else first.
+        </div>
+      )}
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// SIDEBAR
+// ---------------------------------------------------------------------------
+export function ShowSwitcher({ shows, currentShowId, setCurrentShowId }) {
+  const [open, setOpen] = useState(false);
+  const current = shows.find((s) => s.id === currentShowId);
+  const meta = current ? STATUS_META[current.status] : null;
+
+  return (
+    <div style={{ position: 'relative', marginBottom: 16 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="td-focusable"
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          background: COLOR.card,
+          border: `1px solid ${COLOR.lineBright}`,
+          borderRadius: 4,
+          padding: '10px 10px',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div className="td-mono" style={{ fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 3 }}>WORKING ON</div>
+          {current ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color, flexShrink: 0 }} />
+              <span className="td-display" style={{ fontSize: 13, color: COLOR.textPrimary, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {current.title}
+              </span>
+            </div>
+          ) : (
+            <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint }}>None selected</span>
+          )}
+        </div>
+        <ChevronDown size={14} color={COLOR.textFaint} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            marginTop: 4,
+            background: COLOR.card,
+            border: `1px solid ${COLOR.lineBright}`,
+            borderRadius: 4,
+            padding: 6,
+            zIndex: 10,
+            boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
+          }}
+        >
+          {shows.map((s) => {
+            const m = STATUS_META[s.status];
+            const isSel = s.id === currentShowId;
+            return (
+              <button
+                key={s.id}
+                onClick={() => { setCurrentShowId(s.id); setOpen(false); }}
+                className="td-focusable"
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: isSel ? COLOR.panel : 'transparent',
+                  border: 'none',
+                  borderRadius: 3,
+                  padding: '8px 8px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.color, flexShrink: 0 }} />
+                <span className="td-body" style={{ fontSize: 12.5, color: isSel ? COLOR.amber : COLOR.textPrimary, flex: 1 }}>{s.title}</span>
+                <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint }}>{s.venue}</span>
+              </button>
+            );
+          })}
+          <div style={{ borderTop: `1px solid ${COLOR.line}`, marginTop: 4, paddingTop: 4 }}>
+            <button
+              onClick={() => { setCurrentShowId(null); setOpen(false); }}
+              className="td-focusable"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: !currentShowId ? COLOR.panel : 'transparent',
+                border: 'none',
+                borderRadius: 3,
+                padding: '8px 8px',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: COLOR.slate, flexShrink: 0 }} />
+              <span className="td-body" style={{ fontSize: 12.5, color: !currentShowId ? COLOR.amber : COLOR.textMuted, flex: 1 }}>None — baseline / company-wide</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+export function Sidebar({ active, setActive, shows, currentShowId, setCurrentShowId, onSignOut, onChangeCompany }) {
+  // Bottom-of-rail actions: leaving this company, and leaving the app entirely.
+  const footerButton = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '9px 10px',
+    borderRadius: 3,
+    border: 'none',
+    background: 'transparent',
+    color: COLOR.textMuted,
+    cursor: 'pointer',
+    textAlign: 'left',
+    borderLeft: '2px solid transparent',
+    width: '100%',
+  };
+  const items = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
+    { id: 'schedule', label: 'Schedule', icon: CalendarDays },
+    { id: 'scenes', label: 'Scenes', icon: Clapperboard },
+    { id: 'crew', label: 'Crew', icon: Users },
+    { id: 'actors', label: 'Actors', icon: Star },
+    { id: 'musicians', label: 'Musicians', icon: Music },
+    { id: 'staff', label: 'Staff', icon: Briefcase },
+    { id: 'choreography', label: 'Choreography', icon: Footprints },
+    { id: 'costumes', label: 'Costumes', icon: Shirt },
+    { id: 'props', label: 'Props', icon: Package },
+    { id: 'calls', label: 'Calls', icon: Bell },
+    { id: 'audio', label: 'Audio', icon: Radio },
+    { id: 'inventory', label: 'Inventory', icon: Boxes },
+    { id: 'set', label: 'Set', icon: Box },
+    { id: 'runofshow', label: 'Run of Show', icon: ListChecks },
+    { id: 'script', label: 'Script', icon: FileText },
+    { id: 'settings', label: 'Settings', icon: Settings },
+  ];
+  return (
+    <div style={{ width: 200, background: COLOR.panel, borderRight: `1px solid ${COLOR.line}`, padding: '20px 12px', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+      <div className="td-display" style={{ color: COLOR.textPrimary, fontSize: 16, letterSpacing: '0.08em', padding: '0 10px 16px' }}>
+        Tech Desk
+      </div>
+      <ShowSwitcher shows={shows} currentShowId={currentShowId} setCurrentShowId={setCurrentShowId} />
+      {items.map((item) => {
+        const Icon = item.icon;
+        const isActive = active === item.id;
+        return (
+          <button
+            key={item.id}
+            onClick={() => setActive(item.id)}
+            className="td-focusable"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '9px 10px',
+              borderRadius: 3,
+              border: 'none',
+              background: isActive ? COLOR.card : 'transparent',
+              color: isActive ? COLOR.amber : COLOR.textMuted,
+              cursor: 'pointer',
+              textAlign: 'left',
+              borderLeft: isActive ? `2px solid ${COLOR.amber}` : '2px solid transparent',
+            }}
+          >
+            <Icon size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>{item.label}</span>
+          </button>
+        );
+        })}
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
+          <button onClick={onChangeCompany} className="td-focusable" style={footerButton}>
+            <Building2 size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>Change company</span>
+          </button>
+          <button onClick={onSignOut} className="td-focusable" style={footerButton}>
+            <LogOut size={15} strokeWidth={1.75} />
+            <span className="td-body" style={{ fontSize: 13 }}>Sign out</span>
+          </button>
+        </div>
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// CLOCK
+// ---------------------------------------------------------------------------
+export function HouseClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return (
+    <div style={{ textAlign: 'right' }}>
+      <div className="td-mono" style={{ fontSize: 18, color: COLOR.textPrimary, letterSpacing: '0.03em' }}>{time}</div>
+      <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em' }}>{date.toUpperCase()}</div>
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// MAIN APP
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// SHOW GATE — the front door. Open the app, pick what you're working on,
+// then every module downstream already knows.
+// ---------------------------------------------------------------------------
+export function NoShowSelected({ shows, setCurrentShowId, label }) {
+  return (
+    <div>
+      <StubPanel label={`Select a show to view its ${label}`} hint="Pick a production from the switcher at the top of the sidebar, or create one on the Dashboard. Everything except the company rosters and Settings is scoped to one show." />
+      {shows.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16, maxWidth: 420 }}>
+          {shows.map((s) => {
+            const meta = STATUS_META[s.status];
+            return (
+              <button
+                key={s.id}
+                onClick={() => setCurrentShowId(s.id)}
+                className="td-focusable"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: COLOR.card,
+                  border: `1px solid ${COLOR.line}`,
+                  borderRadius: 4,
+                  padding: '10px 14px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <span className="td-body" style={{ fontSize: 13, color: COLOR.textPrimary }}>{s.title}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className={meta.cls} style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, display: 'inline-block' }} />
+                  <span className="td-mono" style={{ fontSize: 9.5, color: meta.color }}>{meta.label.toUpperCase()}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
