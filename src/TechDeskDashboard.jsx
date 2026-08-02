@@ -16,6 +16,7 @@ import {
   uploadScriptPdf, downloadScriptPdf, deleteScriptPdf,
 } from './persistence.js';
 import { supabase } from './supabaseClient.js';
+import { CharactersPanel, PositionsPanel } from './ShowSetup.jsx';
 
 // ---------------------------------------------------------------------------
 // PERSISTENCE — two stores, doing two different jobs.
@@ -2294,7 +2295,7 @@ function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMENT_ORDER
 // ---------------------------------------------------------------------------
 // NEW CREW MEMBER FORM
 // ---------------------------------------------------------------------------
-function NewCrewForm({ show, onAdd, onClose, DEPARTMENTS, DEPARTMENT_ORDER }) {
+function NewCrewForm({ show, onAdd, onClose, DEPARTMENTS, DEPARTMENT_ORDER, positions }) {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [dept, setDept] = useState('electrics');
@@ -2331,7 +2332,16 @@ function NewCrewForm({ show, onAdd, onClose, DEPARTMENTS, DEPARTMENT_ORDER }) {
           <>
             <div>
               <label className="td-mono" style={labelStyle}>ROLE (THIS SHOW)</label>
-              <input className="td-focusable" style={inputStyle} value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Board Op" />
+              {positions && positions.length ? (
+                <select className="td-focusable" style={inputStyle} value={role} onChange={(e) => setRole(e.target.value)}>
+                  <option value="">Choose...</option>
+                  {positions.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              ) : (
+                <input className="td-focusable" style={inputStyle} value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Board Op" />
+              )}
             </div>
             <div>
               <label className="td-mono" style={labelStyle}>DEPARTMENT</label>
@@ -2387,7 +2397,7 @@ function NewCrewForm({ show, onAdd, onClose, DEPARTMENTS, DEPARTMENT_ORDER }) {
 // selected. Matches an existing platform person by name; if they're not yet
 // linked to this show, prompts only for the show-specific role.
 // ---------------------------------------------------------------------------
-function IdentitySignIn({ show, crew, setCrew, currentUserId, setCurrentUserId, DEPARTMENTS, DEPARTMENT_ORDER }) {
+function IdentitySignIn({ show, crew, setCrew, currentUserId, setCurrentUserId, DEPARTMENTS, DEPARTMENT_ORDER, positions }) {
   const currentUser = crew.find((c) => c.id === currentUserId);
   const currentAssignment = currentUser ? assignmentFor(currentUser, show.id) : null;
   const [name, setName] = useState('');
@@ -2509,7 +2519,16 @@ function IdentitySignIn({ show, crew, setCrew, currentUserId, setCurrentUserId, 
           <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label className="td-mono" style={labelStyle}>ROLE ON {show.title.toUpperCase()}</label>
-              <input className="td-focusable" style={{ ...inputStyle, width: '100%' }} value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Electrician, or just Flex" />
+              {positions && positions.length ? (
+                <select className="td-focusable" style={{ ...inputStyle, width: '100%' }} value={role} onChange={(e) => setRole(e.target.value)}>
+                  <option value="">Choose...</option>
+                  {positions.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              ) : (
+                <input className="td-focusable" style={{ ...inputStyle, width: '100%' }} value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Electrician, or just Flex" />
+              )}
             </div>
             <div>
               <label className="td-mono" style={labelStyle}>DEPARTMENT</label>
@@ -2552,7 +2571,7 @@ function IdentitySignIn({ show, crew, setCrew, currentUserId, setCurrentUserId, 
   );
 }
 
-function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserId, DEPARTMENTS, DEPARTMENT_ORDER }) {
+function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserId, DEPARTMENTS, DEPARTMENT_ORDER, positions }) {
   const [showForm, setShowForm] = useState(false);
   const onShow = show ? crew.filter((m) => assignmentFor(m, show.id)) : [];
   const notOnShow = show ? crew.filter((m) => !assignmentFor(m, show.id)) : crew;
@@ -2589,7 +2608,7 @@ function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserI
 
   return (
     <div>
-      {show && <IdentitySignIn show={show} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={DEPARTMENTS} DEPARTMENT_ORDER={DEPARTMENT_ORDER} />}
+      {show && <IdentitySignIn show={show} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={DEPARTMENTS} DEPARTMENT_ORDER={DEPARTMENT_ORDER} positions={positions} />}
 
       {!show && (
         <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 16 }}>
@@ -2622,7 +2641,7 @@ function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserI
         </button>
       </div>
 
-      {showForm && <NewCrewForm show={show} onAdd={handleManualAdd} onClose={() => setShowForm(false)} DEPARTMENTS={DEPARTMENTS} DEPARTMENT_ORDER={DEPARTMENT_ORDER} />}
+      {showForm && <NewCrewForm show={show} onAdd={handleManualAdd} onClose={() => setShowForm(false)} DEPARTMENTS={DEPARTMENTS} DEPARTMENT_ORDER={DEPARTMENT_ORDER} positions={positions} />}
 
       {show && onShow.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20, marginBottom: 26 }}>
@@ -2648,7 +2667,7 @@ function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurrentUserI
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} hint="Add crew to the company roster first, then assign them to this show and type their position, such as Board Op or Deck Head. Positions are free text for now, so keep the wording consistent across the run." />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add crew to the company roster first, then assign them to this show and pick their position. Positions come from Settings, so Board Op reads the same on every production - add them there first if the list is empty." />
         </div>
       )}
 
@@ -5058,6 +5077,9 @@ function SettingsModule({
       </div>
 
       {/* Members */}
+        {/* Positions */}
+        <PositionsPanel positions={positions} setPositions={setPositions} />
+
         <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
 
         {/* Company */}
@@ -5577,7 +5599,7 @@ function PeopleRosterGroups({ people, show, shows, categoryMap, categoryOrder, r
       )}
       {show && onShow.length === 0 && (
         <div style={{ marginBottom: 26 }}>
-          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and type the role or character they play. Roles are free text for now, so keep the spelling consistent across the show." />
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and pick what they play. Cast pick from the character list under Scenes; band and staff pick from the position lists in Settings." />
         </div>
       )}
 
@@ -5795,7 +5817,10 @@ function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurren
   );
 }
 
-function ActorsModule({ show, shows, actors, setActors, currentUserId, setCurrentUserId, CAST_TYPES, CAST_TYPE_ORDER }) {
+function ActorsModule({ show, shows, actors, setActors, currentUserId, setCurrentUserId, CAST_TYPES, CAST_TYPE_ORDER, characters }) {
+  // Cast into the show's character list once it exists. Until someone builds
+  // that list, fall back to free text so a new production isn't a dead end.
+  const characterNames = (characters || []).map((c) => c.name).filter(Boolean);
   return (
     <PeopleModule
       show={show}
@@ -5807,6 +5832,7 @@ function ActorsModule({ show, shows, actors, setActors, currentUserId, setCurren
       personLabel="cast"
       roleLabel="CHARACTER"
       rolePlaceholder="e.g. Prospero, or Ensemble"
+      roleOptions={characterNames.length ? characterNames : undefined}
       categoryMap={CAST_TYPES}
       categoryOrder={CAST_TYPE_ORDER}
       audioOptions="mic"
@@ -5814,7 +5840,7 @@ function ActorsModule({ show, shows, actors, setActors, currentUserId, setCurren
   );
 }
 
-function StaffModule({ show, shows, staff, setStaff, currentUserId, setCurrentUserId, STAFF_AREAS, STAFF_AREA_ORDER }) {
+function StaffModule({ show, shows, staff, setStaff, currentUserId, setCurrentUserId, STAFF_AREAS, STAFF_AREA_ORDER, positions }) {
   return (
     <PeopleModule
       show={show}
@@ -5824,15 +5850,19 @@ function StaffModule({ show, shows, staff, setStaff, currentUserId, setCurrentUs
       currentUserId={currentUserId}
       setCurrentUserId={setCurrentUserId}
       personLabel="staff"
-      roleLabel="TITLE"
+      roleLabel="POSITION"
       rolePlaceholder="e.g. Director, Producer"
+      roleOptions={positions && positions.length ? positions : undefined}
       categoryMap={STAFF_AREAS}
       categoryOrder={STAFF_AREA_ORDER}
     />
   );
 }
 
-function MusiciansModule({ show, shows, musicians, setMusicians, currentUserId, setCurrentUserId, MUSIC_SECTIONS, MUSIC_SECTION_ORDER, instruments }) {
+function MusiciansModule({ show, shows, musicians, setMusicians, currentUserId, setCurrentUserId, MUSIC_SECTIONS, MUSIC_SECTION_ORDER, instruments, positions }) {
+  // Band positions are the chairs (Reed 1, Keys 2). If none are set up yet the
+  // picker falls back to the instrument list, which is what it used before.
+  const chairOptions = positions && positions.length ? positions : instruments;
   return (
     <PeopleModule
       show={show}
@@ -5844,7 +5874,7 @@ function MusiciansModule({ show, shows, musicians, setMusicians, currentUserId, 
       personLabel="band"
       roleLabel="INSTRUMENT"
       rolePlaceholder="e.g. Violin, Piano 1"
-      roleOptions={instruments}
+      roleOptions={chairOptions}
       categoryMap={MUSIC_SECTIONS}
       categoryOrder={MUSIC_SECTION_ORDER}
       audioOptions="electric"
@@ -7451,8 +7481,9 @@ function SetModule({ show, inventory, setInventory, locations, setShows, INVENTO
 // ---------------------------------------------------------------------------
 // COSTUME FORM
 // ---------------------------------------------------------------------------
-function CostumeForm({ show, showActors, inventory, locations, initial, onSave, onCancel }) {
+function CostumeForm({ show, showActors, inventory, locations, characters, initial, onSave, onCancel }) {
   const [actorId, setActorId] = useState(initial?.actorId || showActors[0]?.id || '');
+  const [characterId, setCharacterId] = useState(initial?.characterId || '');
   const [sceneId, setSceneId] = useState(initial?.sceneId || '');
   const [description, setDescription] = useState(initial?.description || '');
   const [source, setSource] = useState(initial?.source || 'inventory');
@@ -7485,6 +7516,7 @@ function CostumeForm({ show, showActors, inventory, locations, initial, onSave, 
     onSave({
       id: initial?.id || `co${Date.now()}`,
       actorId,
+      characterId: characterId || null,
       sceneId: sceneId || null,
       description: description.trim(),
       source,
@@ -7508,6 +7540,30 @@ function CostumeForm({ show, showActors, inventory, locations, initial, onSave, 
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 2fr', gap: 12 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>CHARACTER</label>
+          <select
+            className="td-focusable"
+            style={inputStyle}
+            value={characterId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCharacterId(next);
+              // Jump the actor to whoever is currently cast in that character,
+              // so a recast only has to be corrected in one place.
+              const chosen = (characters || []).find((c) => c.id === next);
+              if (chosen) {
+                const cast = showActors.find((a) => a.roleTitle === chosen.name);
+                if (cast) setActorId(cast.id);
+              }
+            }}
+          >
+            <option value="">{(characters || []).length ? 'Not tied to a character' : 'No characters yet - add them under Scenes'}</option>
+            {(characters || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="td-mono" style={labelStyle}>CASTED ROLE</label>
           <select className="td-focusable" style={inputStyle} value={actorId} onChange={(e) => setActorId(e.target.value)}>
@@ -7667,7 +7723,7 @@ function CostumeCard({ costume, show, inventory, onEdit, onRemove }) {
 // ---------------------------------------------------------------------------
 // COSTUMES MODULE
 // ---------------------------------------------------------------------------
-function CostumesModule({ show, actors, inventory, locations, setShows }) {
+function CostumesModule({ show, actors, inventory, locations, setShows, characters }) {
   const [filter, setFilter] = useState('all');
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -7756,7 +7812,7 @@ function CostumesModule({ show, actors, inventory, locations, setShows }) {
         </button>
       </div>
 
-      {adding && <CostumeForm show={show} showActors={showActors} inventory={inventory} locations={locations} onSave={addCostume} onCancel={() => setAdding(false)} />}
+      {adding && <CostumeForm show={show} showActors={showActors} inventory={inventory} locations={locations} characters={characters} onSave={addCostume} onCancel={() => setAdding(false)} />}
 
       {Object.keys(grouped).length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -7769,7 +7825,7 @@ function CostumesModule({ show, actors, inventory, locations, setShows }) {
                 {grouped[a.id].map((c) =>
                   editingId === c.id ? (
                     <div key={c.id} style={{ gridColumn: '1 / -1' }}>
-                      <CostumeForm show={show} showActors={showActors} inventory={inventory} locations={locations} initial={c} onSave={saveCostume} onCancel={() => setEditingId(null)} />
+                      <CostumeForm show={show} showActors={showActors} inventory={inventory} locations={locations} characters={characters} initial={c} onSave={saveCostume} onCancel={() => setEditingId(null)} />
                     </div>
                   ) : (
                     <CostumeCard
@@ -7796,8 +7852,9 @@ function CostumesModule({ show, actors, inventory, locations, setShows }) {
 // ---------------------------------------------------------------------------
 // PROP FORM
 // ---------------------------------------------------------------------------
-function PropForm({ show, showActors, inventory, locations, initial, onSave, onCancel }) {
+function PropForm({ show, showActors, inventory, locations, characters, initial, onSave, onCancel }) {
   const [sceneId, setSceneId] = useState(initial?.sceneId || '');
+  const [characterId, setCharacterId] = useState(initial?.characterId || '');
   const [description, setDescription] = useState(initial?.description || '');
   const [actorId, setActorId] = useState(initial?.actorId || '');
   const [source, setSource] = useState(initial?.source || 'inventory');
@@ -7831,6 +7888,7 @@ function PropForm({ show, showActors, inventory, locations, initial, onSave, onC
     onSave({
       id: initial?.id || `pr${Date.now()}`,
       sceneId: sceneId || null,
+      characterId: characterId || null,
       description: description.trim(),
       actorId: actorId || null,
       source,
@@ -7871,6 +7929,30 @@ function PropForm({ show, showActors, inventory, locations, initial, onSave, onC
         <div>
           <label className="td-mono" style={labelStyle}>DESCRIPTION</label>
           <input className="td-focusable" style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is the prop" />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>CHARACTER (OPTIONAL)</label>
+          <select
+            className="td-focusable"
+            style={inputStyle}
+            value={characterId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCharacterId(next);
+              // Tie the prop to the character, then follow through to whoever
+              // is cast in it, so a recast doesn't orphan the handoff.
+              const chosen = (characters || []).find((c) => c.id === next);
+              if (chosen) {
+                const cast = showActors.find((a) => a.roleTitle === chosen.name);
+                if (cast) setActorId(cast.id);
+              }
+            }}
+          >
+            <option value="">{(characters || []).length ? 'Not tied to a character' : 'No characters yet - add them under Scenes'}</option>
+            {(characters || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="td-mono" style={labelStyle}>USED BY (OPTIONAL)</label>
@@ -8030,7 +8112,7 @@ function PropCard({ prop, show, showActors, inventory, onEdit, onRemove }) {
 // PROPS MODULE — grouped by scene, since most props belong to a moment in
 // the show more than to a single actor.
 // ---------------------------------------------------------------------------
-function PropsModule({ show, actors, inventory, locations, setShows }) {
+function PropsModule({ show, actors, inventory, locations, setShows, characters }) {
   const [filter, setFilter] = useState('all');
   const [consumableOnly, setConsumableOnly] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -8154,7 +8236,7 @@ function PropsModule({ show, actors, inventory, locations, setShows }) {
         </div>
       )}
 
-      {adding && <PropForm show={show} showActors={showActors} inventory={inventory} locations={locations} onSave={addProp} onCancel={() => setAdding(false)} />}
+      {adding && <PropForm show={show} showActors={showActors} inventory={inventory} locations={locations} characters={characters} onSave={addProp} onCancel={() => setAdding(false)} />}
 
       {scenes.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -8167,7 +8249,7 @@ function PropsModule({ show, actors, inventory, locations, setShows }) {
                 {grouped[sceneId].map((p) =>
                   editingId === p.id ? (
                     <div key={p.id} style={{ gridColumn: '1 / -1' }}>
-                      <PropForm show={show} showActors={showActors} inventory={inventory} locations={locations} initial={p} onSave={saveProp} onCancel={() => setEditingId(null)} />
+                      <PropForm show={show} showActors={showActors} inventory={inventory} locations={locations} characters={characters} initial={p} onSave={saveProp} onCancel={() => setEditingId(null)} />
                     </div>
                   ) : (
                     <PropCard
@@ -9258,6 +9340,9 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   const [inventory, setInventory] = useState(seedInventory);
   const [cueSheets, setCueSheets] = useState(seedCueSheets);
   const [venues, setVenues] = useState(seedVenues);
+  // Company-level job titles for crew, band and staff, so the same position
+  // reads the same way on every show instead of being retyped per assignment.
+  const [positions, setPositions] = useState({ crew: [], musician: [], staff: [] });
   const [locations, setLocations] = useState(seedLocations);
   const [instruments, setInstruments] = useState(seedInstruments);
   const [departments, setDepartments] = useState(INITIAL_DEPARTMENTS);
@@ -9301,6 +9386,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         setVenues(data.settings.venues.length ? data.settings.venues : seedVenues);
         setLocations(data.settings.locations.length ? data.settings.locations : seedLocations);
         setInstruments(data.settings.instruments.length ? data.settings.instruments : seedInstruments);
+        setPositions(data.settings.positions || { crew: [], musician: [], staff: [] });
         setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS)));
         setDepartmentOrder(data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER);
         setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, Object.keys(data.settings.castTypes).length ? data.settings.castTypes : serializeTaxonomy(INITIAL_CAST_TYPES)));
@@ -9415,7 +9501,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     const timeout = setTimeout(() => {
       saveSettings(
         {
-          venues, locations, instruments,
+          venues, locations, instruments, positions,
           departments: serializeTaxonomy(departments), departmentOrder,
           castTypes: serializeTaxonomy(castTypes), castTypeOrder,
           staffAreas: serializeTaxonomy(staffAreas), staffAreaOrder,
@@ -9430,7 +9516,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
   }, [
-    hydrated, orgId, venues, locations, instruments,
+    hydrated, orgId, venues, locations, instruments, positions,
     departments, departmentOrder, castTypes, castTypeOrder, staffAreas, staffAreaOrder,
     musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
   ]);
@@ -9633,9 +9719,10 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
                 { label: 'Set up the company', target: 'settings', done: venues.length > 0, note: 'Venues, storage locations, instruments, and the department, cast and cue vocabularies every picker pulls from.' },
                 { label: 'Build your company rosters', target: 'crew', done: crew.length + actors.length + musicians.length + staff.length > 0, note: 'Crew, actors, musicians and staff live at company level once — you assign them to individual shows later.' },
                 { label: 'Create the production', target: 'dashboard', done: shows.length > 0, note: 'New production, with its venue and opening date. Everything below hangs off the show you are working on.' },
-                { label: 'Enter the scene list', target: 'scenes', done: (currentShow?.acts?.length || 0) > 0, note: 'Acts, scenes and musical numbers, with cast per scene. Choreography, costumes, props and cues all reference this, so it comes first.' },
+                { label: 'Enter the scene list', target: 'scenes', done: (currentShow?.acts?.length || 0) > 0, note: 'Acts, scenes and musical numbers. Choreography, costumes, props and cues all reference this, so it comes first.' },
+                { label: 'Build the character list', target: 'scenes', done: (currentShow?.characters?.length || 0) > 0, note: 'The roles in the show, ticked into the scenes they appear in. Actors get cast into these, and costumes and props hang off them, so it precedes casting.' },
                 { label: 'Lay out the schedule', target: 'schedule', done: (currentShow?.schedule?.length || 0) > 0, note: 'Load-in, rehearsals, tech week and strike. Calls are generated from these dates, so schedule before you post calls.' },
-                { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Per-show roles and departments, pulled from the rosters. The audio plot and callboard both read these.' },
+                { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Cast actors into characters; crew, band and staff into positions from Settings. The audio plot and callboard both read these.' },
                 { label: 'Work the design lists', target: 'costumes', done: ((currentShow?.costumes?.length || 0) + (currentShow?.props?.length || 0) + (currentShow?.setPieces?.length || 0)) > 0, note: 'Costumes, props and set pieces — tied to actor and scene, tracked from needs-building through acquired.' },
                 { label: 'Stock and pull inventory', target: 'inventory', done: inventory.length > 0, note: 'What the shop owns, what it cost, and which show has it. Tech-week overlaps between productions get flagged.' },
                 { label: 'Post calls to the callboard', target: 'calls', done: calls.some((c) => c.showId === currentShow?.id), note: 'Who is called when, which scenes are being worked, what gear comes out, and who actually turned up.' },
@@ -9761,22 +9848,25 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
 
         {active === 'scenes' &&
           (currentShow ? (
-            <ScenesModule show={currentShow} actors={actors} setShows={setShows} />
+            <>
+              <CharactersPanel show={currentShow} setShows={setShows} />
+              <ScenesModule show={currentShow} actors={actors} setShows={setShows} />
+            </>
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="scene list" />
           ))}
 
         {active === 'crew' && (
-          <CrewModule show={currentShow} shows={shows} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={departments} DEPARTMENT_ORDER={departmentOrder} />
+          <CrewModule show={currentShow} shows={shows} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={departments} DEPARTMENT_ORDER={departmentOrder} positions={positions.crew} />
         )}
         {active === 'actors' && (
-          <ActorsModule show={currentShow} shows={shows} actors={actors} setActors={setActors} currentUserId={currentActorId} setCurrentUserId={setCurrentActorId} CAST_TYPES={castTypes} CAST_TYPE_ORDER={castTypeOrder} />
+          <ActorsModule show={currentShow} shows={shows} actors={actors} setActors={setActors} currentUserId={currentActorId} setCurrentUserId={setCurrentActorId} CAST_TYPES={castTypes} CAST_TYPE_ORDER={castTypeOrder} characters={currentShow?.characters || []} />
         )}
         {active === 'musicians' && (
-          <MusiciansModule show={currentShow} shows={shows} musicians={musicians} setMusicians={setMusicians} currentUserId={currentMusicianId} setCurrentUserId={setCurrentMusicianId} MUSIC_SECTIONS={musicSections} MUSIC_SECTION_ORDER={musicSectionOrder} instruments={instruments} />
+          <MusiciansModule show={currentShow} shows={shows} musicians={musicians} setMusicians={setMusicians} currentUserId={currentMusicianId} setCurrentUserId={setCurrentMusicianId} MUSIC_SECTIONS={musicSections} MUSIC_SECTION_ORDER={musicSectionOrder} instruments={instruments} positions={positions.musician} />
         )}
         {active === 'staff' && (
-          <StaffModule show={currentShow} shows={shows} staff={staff} setStaff={setStaff} currentUserId={currentStaffId} setCurrentUserId={setCurrentStaffId} STAFF_AREAS={staffAreas} STAFF_AREA_ORDER={staffAreaOrder} />
+          <StaffModule show={currentShow} shows={shows} staff={staff} setStaff={setStaff} currentUserId={currentStaffId} setCurrentUserId={setCurrentStaffId} STAFF_AREAS={staffAreas} STAFF_AREA_ORDER={staffAreaOrder} positions={positions.staff} />
         )}
         {active === 'choreography' &&
           (currentShow ? (
@@ -9786,13 +9876,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ))}
         {active === 'costumes' &&
           (currentShow ? (
-            <CostumesModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} />
+            <CostumesModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} characters={currentShow?.characters || []} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="costume needs" />
           ))}
         {active === 'props' &&
           (currentShow ? (
-            <PropsModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} />
+            <PropsModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} characters={currentShow?.characters || []} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="prop needs" />
           ))}
