@@ -5,9 +5,19 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { uploadScriptPdf, downloadScriptPdf, deleteScriptPdf } from './persistence.js';
 import { COLOR } from './theme.jsx';
 
-// The worker has to be pointed at a real URL before any page is rendered;
-// this module is the only place that touches pdfjs now, so it sets it here.
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+// The worker is bundled, not fetched from a CDN.
+//
+// It used to point at a hardcoded cdnjs URL for 4.0.379 while package.json
+// asked for ^4.0.379 — which npm happily resolved to 4.10.38. pdf.js refuses a
+// worker whose version doesn't match the API, falls back to a "fake worker",
+// and every upload died in the catch that reported "Could not upload that PDF".
+// The bug wasn't in the uploader; nothing ever reached it.
+//
+// Importing the worker through Vite means it can never drift from the version
+// actually installed, and a theatre with bad wifi still gets a working script.
+import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 import { cueCode } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -139,7 +149,9 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
       setAdding(false);
       setNewLabel('');
     } catch (err) {
-      setUploadError('Could not upload that PDF. Try again.');
+      // Say what actually went wrong. The generic version of this line is what
+      // hid a CDN version mismatch for as long as it did.
+      setUploadError(`Could not add that script: ${err?.message || 'unknown error'}`);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
