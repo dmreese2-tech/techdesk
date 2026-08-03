@@ -8,8 +8,17 @@ import { StubPanel } from './ui.jsx';
 // SHELL — the frame around every section: sidebar rail, show switcher, house
 // clock, the members panel in Settings, and the no-show-selected gate.
 
+// Tiers decide what someone can see. What they can *edit* comes later, from
+// the positions they hold — see docs/permissions.md.
+const TIER_META = {
+  admin: { label: 'Admin', note: 'Everything, plus the roster and Settings.' },
+  staff: { label: 'Staff', note: 'Reads the whole company. Edits what their positions allow.' },
+  cast: { label: 'Cast', note: 'Reads only what concerns them. Edits nothing.' },
+};
+
 export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const [members, setMembers] = useState(null);
+  const [claims, setClaims] = useState([]);
   const [me, setMe] = useState(null);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -24,6 +33,9 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
     }
     setError('');
     setMembers(data || []);
+    // Admin-only, and it fails harmlessly for everyone else.
+    const { data: claimData } = await supabase.rpc('org_pending_claims', { check_org_id: orgId });
+    setClaims(claimData || []);
   };
 
   useEffect(() => {
@@ -31,12 +43,37 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
-  const admins = (members || []).filter((m) => m.role === 'admin');
-  const iAmAdmin = !!members && members.some((m) => m.user_id === me && m.role === 'admin');
+  // `tier` arrives with 04-accounts-and-identity.sql; until that has run, fall
+  // back to the old admin/member role so this panel still works.
+  const tierOf = (m) => m.tier || (m.role === 'admin' ? 'admin' : 'staff');
+  const admins = (members || []).filter((m) => tierOf(m) === 'admin');
+  const iAmAdmin = !!members && members.some((m) => m.user_id === me && tierOf(m) === 'admin');
 
-  const changeRole = async (member, role) => {
+  const changeTier = async (member, tier) => {
     setBusyId(member.user_id);
-    const { error: err } = await supabase.from('org_members').update({ role }).eq('org_id', orgId).eq('user_id', member.user_id);
+    const { error: err } = await supabase.from('org_members').update({ tier }).eq('org_id', orgId).eq('user_id', member.user_id);
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  const decideClaim = async (claim, approve) => {
+    setBusyId(claim.id);
+    const { error: err } = await supabase.rpc('decide_person_claim', { claim_id: claim.id, approve });
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  const unlink = async (member) => {
+    setBusyId(member.user_id);
+    const { error: err } = await supabase.from('people').update({ user_id: null }).eq('org_id', orgId).eq('user_id', member.user_id);
     setBusyId(null);
     if (err) {
       setError(err.message);
@@ -70,20 +107,62 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
         <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>{error}</div>
       )}
 
+      {/* Claims waiting on an admin. Approving one is what actually attaches an
+          account to a person on the roster, so it sits above the list. */}
+      {iAmAdmin && claims.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.amber, letterSpacing: '0.08em', marginBottom: 6 }}>
+            {claims.length} IDENTITY {claims.length === 1 ? 'CLAIM' : 'CLAIMS'} WAITING
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
+            {claims.map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.amber}`, borderRadius: 3, padding: '8px 10px' }}>
+                <span className="td-body" style={{ flex: 1, fontSize: 12.5, color: COLOR.textPrimary }}>
+                  {c.email} says they are <strong>{c.person_name}</strong>
+                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}> {String(c.person_kind || '').toUpperCase()}</span>
+                </span>
+                <button
+                  className="td-focusable"
+                  disabled={busyId === c.id}
+                  onClick={() => decideClaim(c, true)}
+                  style={{ background: COLOR.amber, border: 'none', borderRadius: 3, color: COLOR.void, fontSize: 11.5, padding: '5px 12px', cursor: 'pointer' }}
+                >
+                  Confirm
+                </button>
+                <button
+                  className="td-focusable"
+                  disabled={busyId === c.id}
+                  onClick={() => decideClaim(c, false)}
+                  style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11.5, padding: '5px 12px', cursor: 'pointer' }}
+                >
+                  Reject
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {members === null ? (
         <div className="td-body" style={sectionNote}>Loading…</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
           {members.map((m) => {
             const isMe = m.user_id === me;
-            const lastAdmin = m.role === 'admin' && admins.length === 1;
+            const tier = tierOf(m);
+            const lastAdmin = tier === 'admin' && admins.length === 1;
             return (
               <div
                 key={m.user_id}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px', flexWrap: 'wrap' }}
               >
-                <span className="td-body" style={{ flex: 1, fontSize: 12.5, color: COLOR.textPrimary }}>
+                <span className="td-body" style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: COLOR.textPrimary }}>
                   {m.email}{isMe ? ' (you)' : ''}
+                  {m.person_name ? (
+                    <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}> — {m.person_name}</span>
+                  ) : (
+                    <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}> NOT ON THE ROSTER</span>
+                  )}
                 </span>
                 <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
                   JOINED {new Date(m.joined_at).toLocaleDateString()}
@@ -91,16 +170,29 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                 {iAmAdmin ? (
                   <select
                     className="td-focusable"
-                    value={m.role}
+                    value={tier}
                     disabled={busyId === m.user_id || lastAdmin}
-                    onChange={(e) => changeRole(m, e.target.value)}
+                    onChange={(e) => changeTier(m, e.target.value)}
+                    title={TIER_META[tier]?.note}
                     style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '4px 6px' }}
                   >
                     <option value="admin">Admin</option>
-                    <option value="member">Member</option>
+                    <option value="staff">Staff</option>
+                    <option value="cast">Cast</option>
                   </select>
                 ) : (
-                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{m.role.toUpperCase()}</span>
+                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{TIER_META[tier]?.label.toUpperCase() || tier.toUpperCase()}</span>
+                )}
+                {iAmAdmin && m.person_id && (
+                  <button
+                    className="td-focusable"
+                    disabled={busyId === m.user_id}
+                    onClick={() => unlink(m)}
+                    title={`Detach this account from ${m.person_name}`}
+                    style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 8px', cursor: 'pointer' }}
+                  >
+                    Unlink
+                  </button>
                 )}
                 {iAmAdmin && !isMe && (
                   <button
@@ -119,10 +211,15 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
       )}
 
       {members !== null && admins.length === 1 && (
-        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint }}>
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint, marginTop: 12 }}>
           The last admin can't be demoted or removed — promote someone else first.
         </div>
       )}
+      <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginTop: 10, maxWidth: 640, lineHeight: 1.55 }}>
+        <strong style={{ color: COLOR.textMuted }}>Admin</strong> {TIER_META.admin.note}{' '}
+        <strong style={{ color: COLOR.textMuted }}>Staff</strong> {TIER_META.staff.note}{' '}
+        <strong style={{ color: COLOR.textMuted }}>Cast</strong> {TIER_META.cast.note}
+      </div>
     </div>
   );
 }

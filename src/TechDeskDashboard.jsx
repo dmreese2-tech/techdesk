@@ -18,6 +18,7 @@ import {
 import { supabase } from './supabaseClient.js';
 import { CharactersPanel } from './Characters.jsx';
 import { TopBar } from './TopBar.jsx';
+import { ClaimBanner } from './Claim.jsx';
 
 // ---------------------------------------------------------------------------
 // PERSISTENCE — two stores, doing two different jobs.
@@ -762,6 +763,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: COLOR.void }}>
       {FONTS}
       <TopBar orgId={orgId} section={active} orgLogo={orgLogo} />
+      <ClaimBanner orgId={orgId} />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <Sidebar
         active={active}
