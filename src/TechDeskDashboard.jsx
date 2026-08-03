@@ -401,17 +401,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   const [deniedMessage, setDeniedMessage] = useState('');
   // On a phone the rail is a drawer over the content rather than a column
   // beside it; on a desktop it stays put and this flag is ignored.
-  // Whether the section on screen is editable. Unknown counts as editable so
-  // nothing flashes grey while the answer is still in flight; the database is
-  // the one that actually refuses, and this only spares people the surprise.
-  const sectionModule = SECTION_MODULE[active] || null;
-  const sectionWritable = (() => {
-    if (active === 'settings') return isAdmin !== false;
-    if (!sectionModule) return true;
-    if (canWrite === null) return true;
-    if (active === 'inventory') return canWrite.inventoryCategories.size > 0;
-    return !!canWrite.byShow[currentShowId]?.has(sectionModule);
-  })();
+
 
   const isNarrow = useIsNarrow();
   const [navOpen, setNavOpen] = useState(false);
@@ -588,6 +578,18 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // Shared production data — each collection syncs independently, and each
   // diffs against what it saved last time so removed rows actually get
   // deleted server-side instead of quietly sticking around forever.
+  // Whether the section on screen is editable. Unknown counts as editable so
+  // nothing flashes grey while the answer is still in flight; the database is
+  // the one that actually refuses, and this only spares people the surprise.
+  const sectionModule = SECTION_MODULE[active] || null;
+  const sectionWritable = (() => {
+    if (active === 'settings') return isAdmin !== false;
+    if (!sectionModule) return true;
+    if (canWrite === null) return true;
+    if (active === 'inventory') return canWrite.inventoryCategories.size > 0;
+    return !!canWrite.byShow[currentShowId]?.has(sectionModule);
+  })();
+
   const reportDenied = React.useCallback(
     () => setDeniedMessage("That change wasn't saved — this section isn't yours to edit. Reload to see where it stands."),
     []
