@@ -375,6 +375,10 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // The company's own logo, kept as a small data URL on org_settings so it
   // travels with the company rather than the browser that uploaded it.
   const [orgLogo, setOrgLogo] = useState('');
+  // Settings are the company's vocabulary and are admin-only from Phase 4 on.
+  // Without this, every non-admin's debounced settings save would 403 on
+  // loop and light up the persistence warning for something they never did.
+  const [isAdmin, setIsAdmin] = useState(null);
   // On a phone the rail is a drawer over the content rather than a column
   // beside it; on a desktop it stays put and this flag is ignored.
   const isNarrow = useIsNarrow();
@@ -448,6 +452,16 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         setInstruments(data.settings.instruments.length ? data.settings.instruments : seedInstruments);
         setPositions(data.settings.positions || { crew: [], musician: [], staff: [] });
         setOrgLogo(data.settings.logoUrl || '');
+        supabase.auth.getUser().then(({ data: u }) => {
+          if (!u?.user) return;
+          supabase
+            .from('org_members')
+            .select('tier')
+            .eq('org_id', orgId)
+            .eq('user_id', u.user.id)
+            .maybeSingle()
+            .then(({ data: m }) => setIsAdmin(m?.tier === 'admin'));
+        });
         setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS)));
         setDepartmentOrder(data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER);
         setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, Object.keys(data.settings.castTypes).length ? data.settings.castTypes : serializeTaxonomy(INITIAL_CAST_TYPES)));
@@ -558,7 +572,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // Org settings — venues, locations, instruments, and every taxonomy —
   // one row, always upserted.
   useEffect(() => {
-    if (!hydrated) return undefined;
+    if (!hydrated || isAdmin !== true) return undefined;
     const timeout = setTimeout(() => {
       saveSettings(
         {
@@ -577,7 +591,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
   }, [
-    hydrated, orgId, venues, locations, instruments, positions, orgLogo,
+    hydrated, isAdmin, orgId, venues, locations, instruments, positions, orgLogo,
     departments, departmentOrder, castTypes, castTypeOrder, staffAreas, staffAreaOrder,
     musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
   ]);
