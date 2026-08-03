@@ -195,7 +195,9 @@ export async function loadOrgData(orgId) {
   const [showsRes, showItemsRes, peopleRes, callsRes, itemsRes, cuesRes, settingsRes] = await Promise.all([
     supabase.from('shows').select('*').eq('org_id', orgId),
     supabase.from('show_items').select('*').eq('org_id', orgId),
-    supabase.from('people').select('*').eq('org_id', orgId),
+    // people_view, not people: same rows and the same policies, but the phone
+    // and email columns come back null for cast. Writes still go to the table.
+    supabase.from('people_view').select('*').eq('org_id', orgId),
     supabase.from('calls').select('*').eq('org_id', orgId),
     supabase.from('inventory_items').select('*').eq('org_id', orgId),
     supabase.from('cues').select('*').eq('org_id', orgId),

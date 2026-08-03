@@ -186,15 +186,42 @@ row offers "You appear on the Graveyard Girls company list as Sarah Chen. Is tha
 This is the part that needs your eye, because it's the part that decides whether an actor
 finds the app useful or useless.
 
-Proposed: the schedule; calls they are slotted into; scenes they appear in via their
-characters; costumes and props attached to their characters; run of show; the script.
+**Settled: cast see every scene membership, not only their own.** Who is on stage when
+is the shared map of the production — an actor checking which scenes they are called
+for reads the same list as everyone else, and hiding the other names would make the
+document useless without protecting anything. This also removes the one genuinely
+expensive piece of the phase: no per-row subquery joining scenes to characters to
+people to accounts, no index, no query plan to worry about. `show_items` stays readable
+company-wide.
 
-Not: other people's phone numbers and emails, the inventory, the full crew roster, the
-audio plot, budgets or notes fields on anything.
+**Settled: contacts are the only thing hidden.** Cast read the schedule, scenes and
+their memberships, characters, costumes, props, calls, run of show, the inventory and
+the script — the same documents staff read. The one thing withheld is other people's
+phone numbers and email addresses.
+
+That makes the read half of this phase a single view over two columns, and it is done.
+Everything else about who-can-do-what is a *write* question, and writes have been
+answered since Phase 4.
 
 Contact details are the sharpest edge — `people` currently carries `phone` and `email`
 for everyone, and every org member can read the whole table. Cast reading that is a
 privacy problem, not just a tidiness one.
+
+**How, concretely.** RLS gates rows, not columns, so hiding a phone number is not a
+policy — it is a view. `people_view`, owned by postgres with `security_invoker = on` so
+the base table's policies still apply, selecting `phone` and `email` only when the
+viewer is admin or staff, or when the row is their own. `loadOrgData` reads the view;
+writes keep going to the table. One migration, one line in `persistence.js`.
+
+~~Cast reads of `show_items` are the harder half~~ — dropped. Scene memberships are
+readable by everyone (see above), so there is no per-row subquery to write and no
+index to tune. The contact view is the whole of the read restriction.
+
+**Do not ship read restrictions by halves.** A read policy that is half applied doesn't
+refuse writes, it makes the app look empty to the people it was built to include, and an
+actor who opens the callboard to a blank schedule an hour before curtain has no way to
+tell a permission bug from a cancelled call. This is why the contact view redacts two
+columns rather than withholding rows.
 
 ---
 
