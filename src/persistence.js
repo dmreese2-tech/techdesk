@@ -40,6 +40,9 @@ const SHOW_MODULES = {
   set: 'setPieces',
   audio: 'soundEffects',
   groups: 'groups',
+  // Script versions: the same production's pages marked up for choreography,
+  // for cues, for blocking. Siblings, not revisions of one another.
+  script: 'scriptVersions',
 };
 
 // What we last wrote, per show and module, by array identity. Modules update
@@ -92,6 +95,7 @@ function showRowToJs(row, itemsForShow) {
     costumes: itemsForShow ? itemsForShow.costumes || [] : row.costumes || [],
     props: itemsForShow ? itemsForShow.props || [] : row.props || [],
     groups: itemsForShow ? itemsForShow.groups || [] : row.groups || [],
+    scriptVersions: itemsForShow ? itemsForShow.script || [] : [],
 
     script: meta ? { ...meta, pdfBytes: null } : null, // bytes fetched separately, on demand, from Storage
   };
@@ -381,20 +385,27 @@ export async function saveSettings(settings, orgId) {
 // ---------------------------------------------------------------------------
 const SCRIPTS_BUCKET = 'scripts';
 
-export async function uploadScriptPdf(orgId, showId, file) {
-  const path = `${orgId}/${showId}/script.pdf`;
+// One file per version, named for the version. The path is what the storage
+// policy reads to decide whether you may see it, so the version id has to be
+// in it — see 11-script-versions.sql.
+function scriptPath(orgId, showId, versionId) {
+  return `${orgId}/${showId}/${versionId}.pdf`;
+}
+
+export async function uploadScriptPdf(orgId, showId, versionId, file) {
+  const path = scriptPath(orgId, showId, versionId);
   const { error } = await supabase.storage.from(SCRIPTS_BUCKET).upload(path, file, { upsert: true, contentType: 'application/pdf' });
   if (error) throw error;
   return path;
 }
-export async function downloadScriptPdf(orgId, showId) {
-  const path = `${orgId}/${showId}/script.pdf`;
+export async function downloadScriptPdf(orgId, showId, versionId) {
+  const path = scriptPath(orgId, showId, versionId);
   const { data, error } = await supabase.storage.from(SCRIPTS_BUCKET).download(path);
   if (error) throw error;
   return new Uint8Array(await data.arrayBuffer());
 }
-export async function deleteScriptPdf(orgId, showId) {
-  const path = `${orgId}/${showId}/script.pdf`;
+export async function deleteScriptPdf(orgId, showId, versionId) {
+  const path = scriptPath(orgId, showId, versionId);
   await supabase.storage.from(SCRIPTS_BUCKET).remove([path]);
 }
 

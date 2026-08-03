@@ -1127,7 +1127,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ))}
         {active === 'script' &&
           (currentShow ? (
-            <ScriptModule show={currentShow} orgId={orgId} cueSheets={cueSheets} setShows={setShows} CUE_DEPTS={cueDepts} />
+            <ScriptModule show={currentShow} orgId={orgId} cueSheets={cueSheets} setShows={setShows} CUE_DEPTS={cueDepts} canEdit={sectionWritable} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="script" />
           ))}

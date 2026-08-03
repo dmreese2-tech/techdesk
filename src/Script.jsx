@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Crosshair, Download, FileText, Upload } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Crosshair, Download, Eye, EyeOff, FileText, Plus, Trash2, Upload } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { uploadScriptPdf, downloadScriptPdf, deleteScriptPdf } from './persistence.js';
@@ -21,8 +21,22 @@ import { StubPanel } from './ui.jsx';
 // features in this file that depend on packages outside lucide-react —
 // see the import comment at the top of the file.
 // ---------------------------------------------------------------------------
-export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
-  const script = show.script;
+// The variants a production actually keeps. Presets so the callboard reads the
+// same on every show; the free-text box below covers everything else.
+export const SCRIPT_TYPES = [
+  { key: 'original', label: 'Original' },
+  { key: 'cues', label: 'Script with cues' },
+  { key: 'blocking', label: 'Script with blocking notes' },
+  { key: 'choreo', label: 'Script with choreo notes' },
+  { key: 'rehearsal', label: 'Rehearsal draft' },
+];
+
+export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canEdit = true }) {
+  const versions = show.scriptVersions || [];
+  const [activeId, setActiveId] = useState(null);
+  // Fall back to the first version rather than nothing, so opening the section
+  // shows a script instead of an empty frame with a picker above it.
+  const script = versions.find((v) => v.id === activeId) || versions[0] || null;
   const cues = cueSheets[show.id] || [];
   const [pageNum, setPageNum] = useState(1);
   const [placingCueId, setPlacingCueId] = useState(null);
@@ -31,6 +45,9 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
   const [exporting, setExporting] = useState(false);
   const [pdfDoc, setPdfDoc] = useState(null);
   const [rendering, setRendering] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newType, setNewType] = useState('cues');
+  const [newLabel, setNewLabel] = useState('');
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -45,7 +62,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
     }
     (async () => {
       try {
-        const bytes = await downloadScriptPdf(orgId, show.id);
+        const bytes = await downloadScriptPdf(orgId, show.id, script.id);
         const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
         if (!cancelled) {
           setPdfDoc(doc);
@@ -100,10 +117,27 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
       const bytes = new Uint8Array(arrayBuffer);
       const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
       const pageCount = doc.numPages;
-      await uploadScriptPdf(orgId, show.id, file);
+      const id = `sv-${Date.now()}`;
+      await uploadScriptPdf(orgId, show.id, id, file);
+      const preset = SCRIPT_TYPES.find((t) => t.key === newType);
+      const version = {
+        id,
+        type: newType,
+        label: (newLabel.trim() || (preset ? preset.label : 'Script')),
+        fileName: file.name,
+        pageCount,
+        markers: [],
+        // Uploading is not publishing. A half-marked blocking draft should not
+        // land on forty phones the moment it is saved.
+        published: false,
+        uploadedAt: new Date().toISOString(),
+      };
       setShows((prev) =>
-        prev.map((s) => (s.id === show.id ? { ...s, script: { fileName: file.name, pageCount, markers: [] } } : s))
+        prev.map((s) => (s.id === show.id ? { ...s, scriptVersions: [...(s.scriptVersions || []), version] } : s))
       );
+      setActiveId(id);
+      setAdding(false);
+      setNewLabel('');
     } catch (err) {
       setUploadError('Could not upload that PDF. Try again.');
     } finally {
@@ -113,9 +147,32 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
   }
 
   function replaceScript() {
-    deleteScriptPdf(orgId, show.id).catch(() => {});
-    setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, script: null } : s)));
+    if (!script) return;
+    deleteScriptPdf(orgId, show.id, script.id).catch(() => {});
+    setShows((prev) =>
+      prev.map((s) =>
+        s.id === show.id ? { ...s, scriptVersions: (s.scriptVersions || []).filter((v) => v.id !== script.id) } : s
+      )
+    );
+    setActiveId(null);
     setPlacingCueId(null);
+  }
+
+  // Every write goes through here so a version edit only ever replaces that
+  // version's row — the same identity trick the rest of the app uses.
+  function patchVersion(versionId, patch) {
+    setShows((prev) =>
+      prev.map((s) =>
+        s.id === show.id
+          ? {
+              ...s,
+              scriptVersions: (s.scriptVersions || []).map((v) =>
+                v.id === versionId ? { ...v, ...patch } : v
+              ),
+            }
+          : s
+      )
+    );
   }
 
   function handleCanvasClick(e) {
@@ -127,7 +184,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
     setShows((prev) =>
       prev.map((s) =>
         s.id === show.id
-          ? { ...s, script: { ...s.script, markers: [...(s.script.markers || []).filter((m) => m.cueId !== placingCueId), marker] } }
+          ? { ...s, scriptVersions: (s.scriptVersions || []).map((v) => (v.id === script.id ? { ...v, markers: [...(v.markers || []).filter((m) => m.cueId !== placingCueId), marker] } : v)) }
           : s
       )
     );
@@ -136,7 +193,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
 
   function removeMarker(markerId) {
     setShows((prev) =>
-      prev.map((s) => (s.id === show.id ? { ...s, script: { ...s.script, markers: (s.script.markers || []).filter((m) => m.id !== markerId) } } : s))
+      prev.map((s) => (s.id === show.id ? { ...s, scriptVersions: (s.scriptVersions || []).map((v) => (v.id === script.id ? { ...v, markers: (v.markers || []).filter((m) => m.id !== markerId) } : v)) } : s))
     );
   }
 
@@ -144,7 +201,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
     if (!script) return;
     setExporting(true);
     try {
-      const bytes = await downloadScriptPdf(orgId, show.id);
+      const bytes = await downloadScriptPdf(orgId, show.id, script.id);
       const outDoc = await PDFDocument.load(bytes);
       const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
       const pages = outDoc.getPages();
@@ -185,9 +242,102 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
     fontSize: 12.5,
   };
 
+  const typeLabel = (v) => v.label || (SCRIPT_TYPES.find((t) => t.key === v.type) || {}).label || 'Script';
+
+  const versionStrip = (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: versions.length ? 10 : 0 }}>
+        {versions.map((v) => {
+          const on = script && v.id === script.id;
+          return (
+            <button
+              key={v.id}
+              onClick={() => setActiveId(v.id)}
+              className="td-focusable"
+              title={`${v.fileName || ''} — ${v.pageCount || '?'} pages`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: on ? COLOR.amber : 'transparent',
+                color: on ? COLOR.void : COLOR.textMuted,
+                border: `1px solid ${on ? COLOR.amber : COLOR.line}`,
+                borderRadius: 20,
+                padding: '5px 12px',
+                fontSize: 11.5,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {typeLabel(v)}
+              {v.published ? (
+                <Eye size={11} />
+              ) : (
+                <EyeOff size={11} style={{ opacity: 0.7 }} />
+              )}
+            </button>
+          );
+        })}
+        {canEdit && (
+          <button
+            onClick={() => setAdding((a) => !a)}
+            className="td-focusable"
+            style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', color: COLOR.blueprint, border: `1px dashed ${COLOR.line}`, borderRadius: 20, padding: '5px 12px', fontSize: 11.5, cursor: 'pointer' }}
+          >
+            <Plus size={12} /> Add a version
+          </button>
+        )}
+      </div>
+
+      {versions.length > 0 && (
+        <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>
+          {canEdit
+            ? 'Cast see published versions only — the eye tells you which. Everything else is yours alone until you publish it.'
+            : 'These are the versions published for this production. You can read and download them.'}
+        </div>
+      )}
+
+      {canEdit && adding && (
+        <div style={{ marginTop: 12, background: COLOR.card, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, display: 'block', marginBottom: 4 }}>WHICH SCRIPT IS THIS?</label>
+              <select className="td-focusable" style={{ ...inputStyle, width: '100%' }} value={newType} onChange={(e) => setNewType(e.target.value)}>
+                {SCRIPT_TYPES.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, display: 'block', marginBottom: 4 }}>NAME IT SOMETHING ELSE (OPTIONAL)</label>
+              <input
+                className="td-focusable"
+                style={{ ...inputStyle, width: '100%' }}
+                value={newLabel}
+                placeholder="e.g. Music director's copy"
+                onChange={(e) => setNewLabel(e.target.value)}
+              />
+            </div>
+          </div>
+          <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleUpload} style={{ display: 'none' }} />
+          <button
+            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+            disabled={uploading}
+            className="td-focusable"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '8px 16px', fontSize: 12.5, fontWeight: 700, cursor: uploading ? 'default' : 'pointer', opacity: uploading ? 0.6 : 1 }}
+          >
+            <Upload size={14} /> {uploading ? 'Reading PDF…' : 'Choose PDF'}
+          </button>
+          {uploadError && <div className="td-mono" style={{ fontSize: 11, color: COLOR.amber, marginTop: 10 }}>{uploadError}</div>}
+        </div>
+      )}
+    </div>
+  );
+
   if (!script) {
     return (
       <div>
+        {versionStrip}
         <div
           style={{
             border: `1px dashed ${COLOR.lineBright}`,
@@ -236,6 +386,8 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
   const markersOnPage = (script.markers || []).filter((m) => m.page === pageNum);
 
   return (
+    <div>
+    {versionStrip}
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       <div style={{ flex: '1 1 480px', minWidth: 320 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
@@ -246,9 +398,21 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={replaceScript} className="td-focusable" style={{ background: 'none', border: `1px solid ${COLOR.line}`, color: COLOR.textFaint, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}>
-              Replace script
+            {canEdit && (
+              <button
+                onClick={() => patchVersion(script.id, { published: !script.published })}
+                className="td-focusable"
+                title={script.published ? 'Cast can open this. Unpublish to take it back.' : 'Only you can see this. Publish it to give it to the cast.'}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: script.published ? COLOR.amber : 'transparent', color: script.published ? COLOR.void : COLOR.amber, border: `1px solid ${COLOR.amber}`, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}
+              >
+                {script.published ? <><Check size={12} /> Published</> : <><Eye size={12} /> Publish to cast</>}
+              </button>
+            )}
+            {canEdit && (
+            <button onClick={replaceScript} className="td-focusable" title="Delete this version" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: `1px solid ${COLOR.line}`, color: COLOR.textFaint, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}>
+              <Trash2 size={12} /> Delete version
             </button>
+            )}
             <button
               onClick={handleExport}
               disabled={exporting || (script.markers || []).length === 0}
@@ -398,6 +562,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS }) {
           <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" hint="Cues are created on Run of Show. Once they exist, come back here to place each one on the actual script page and export an annotated copy for the book." />
         )}
       </div>
+    </div>
     </div>
   );
 }
