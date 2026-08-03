@@ -7,9 +7,11 @@ import { Menu, Building2, LogOut, LayoutGrid, Users, Boxes, ListChecks, Settings
 // PDF for export. Both run entirely client-side — nothing is uploaded
 // anywhere. Session data (everything below) is now persisted locally in
 // this browser via IndexedDB — see the PERSISTENCE section.
-import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+// pdf.js and pdf-lib live in Script.jsx, which is the only module that
+// renders or writes a PDF. They were left here by the split of the original
+// monolith, unused — except for the worker line, which ran *after*
+// Script.jsx set its own and quietly put the CDN path back. Last write won,
+// so bundling the worker had no effect until this went.
 import {
   loadOrgData, saveShows, deleteShows, savePeople, deletePeople, saveCalls, deleteCalls,
   saveInventory, deleteInventory, saveCueSheetForShow, saveSettings, subscribeToOrgChanges,
