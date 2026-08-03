@@ -75,14 +75,7 @@ create table if not exists shows (
   open_date date,
   crew_call_today text,
   headcount_today int default 0,
-  schedule jsonb not null default '[]',
-  sound_effects jsonb not null default '[]',
-  choreography jsonb not null default '[]',
-  acts jsonb not null default '[]',
-  set_pieces jsonb not null default '[]',
-  costumes jsonb not null default '[]',
-  props jsonb not null default '[]',
-  groups jsonb not null default '[]',
+  -- The show's contents are rows in show_items now, not columns here.
   script_meta jsonb, -- { fileName, pageCount, markers } — the PDF bytes live in Storage, not here
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
