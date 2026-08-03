@@ -18,7 +18,7 @@ import { PositionPermissionsPanel } from './PositionPermissions.jsx';
 // Existing entries keep their original icon; new entries get a shared
 // fallback icon since there's no icon picker here.
 // ---------------------------------------------------------------------------
-export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defaultIcon }) {
+export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defaultIcon, colors = false }) {
   const [newLabel, setNewLabel] = useState('');
   const [editingKey, setEditingKey] = useState(null);
   const [labelDraft, setLabelDraft] = useState('');
@@ -74,7 +74,24 @@ export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defa
           const Icon = entry.icon || defaultIcon;
           return (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <Icon size={12.5} color={COLOR.textMuted} strokeWidth={1.75} />
+              {colors ? (
+                // The swatch is the control. A native colour input is ugly but
+                // it is also the one every OS already knows how to drive, and
+                // this is a setting people touch once a season.
+                <label
+                  title={`Colour for ${entry.label} on the script`}
+                  style={{ position: 'relative', width: 14, height: 14, borderRadius: 3, flexShrink: 0, cursor: 'pointer', background: entry.color || COLOR.slateDim, border: `1px solid ${COLOR.line}` }}
+                >
+                  <input
+                    type="color"
+                    value={entry.color || '#E8A33D'}
+                    onChange={(e) => setMap((prev) => ({ ...prev, [key]: { ...prev[key], color: e.target.value } }))}
+                    style={{ opacity: 0, position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                  />
+                </label>
+              ) : (
+                <Icon size={12.5} color={COLOR.textMuted} strokeWidth={1.75} />
+              )}
               {editingKey === key ? (
                 <>
                   <input
@@ -643,12 +660,13 @@ export function SettingsModule({
           />
           <TaxonomyEditor
             title="Cue departments"
-            note="LX, sound, fly... the prefix on every cue number."
+            note="LX, sound, fly… the prefix on every cue number. The colour is what the cue looks like once it's dropped on the script — pick something that survives being printed."
             map={CUE_DEPTS}
             order={CUE_DEPT_ORDER}
             setMap={setCUE_DEPTS}
             setOrder={setCUE_DEPT_ORDER}
             defaultIcon={ClipboardList}
+            colors
           />
         </div>
       </div>

@@ -933,13 +933,32 @@ export const seedInventory = [
     assignments: [] },
 ];
 
+// Cue departments carry a colour so a marked-up page can be read at a glance
+// in a dark booth. These are picked to stay legible printed on white paper too,
+// which is where most of these scripts actually end up.
+export const CUE_DEPT_PALETTE = [
+  '#E8A33D', '#4A9FD8', '#6FCF97', '#C77DBF', '#E4695E',
+  '#8B8FE8', '#5FBDB0', '#D9A05B', '#9AA5B1',
+];
+
 export const INITIAL_CUE_DEPTS = {
-  electrics: { label: 'LX', icon: Zap },
-  sound: { label: 'SND', icon: Volume2 },
-  rigging: { label: 'FLY', icon: Link2 },
-  scenic: { label: 'SCENE', icon: Hammer },
-  sm: { label: 'SM', icon: ClipboardList },
+  electrics: { label: 'LX', icon: Zap, color: '#E8A33D' },
+  sound: { label: 'SND', icon: Volume2, color: '#4A9FD8' },
+  rigging: { label: 'FLY', icon: Link2, color: '#6FCF97' },
+  scenic: { label: 'SCENE', icon: Hammer, color: '#C77DBF' },
+  sm: { label: 'SM', icon: ClipboardList, color: '#E4695E' },
 };
+
+// The colour to draw a cue in. Falls back down a chain rather than throwing:
+// a department added before colours existed, or a cue whose department was
+// deleted, still has to render.
+export function deptColor(deptKey, cueDepts) {
+  const entry = cueDepts && cueDepts[deptKey];
+  if (entry && entry.color) return entry.color;
+  const keys = Object.keys(cueDepts || {});
+  const i = keys.indexOf(deptKey);
+  return CUE_DEPT_PALETTE[i >= 0 ? i % CUE_DEPT_PALETTE.length : 0];
+}
 
 // A cue's identity is its department + number together (LX 1 and SND 1 are
 // different cues that happen to share a number) — num itself is just a

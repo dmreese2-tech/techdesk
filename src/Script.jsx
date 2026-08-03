@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Crosshair, Download, Eye, EyeOff, FileText, Plus, Trash2, Upload } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Crosshair, Download, Eye, EyeOff, FileText, Footprints, Plus, StickyNote, Trash2, Upload } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { uploadScriptPdf, downloadScriptPdf, deleteScriptPdf } from './persistence.js';
@@ -18,7 +18,7 @@ import { COLOR } from './theme.jsx';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-import { cueCode } from './shared.jsx';
+import { cueCode, deptColor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // SCRIPT — the uploaded PDF, click-to-place cue markers on the real page, and
@@ -48,8 +48,17 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
   // shows a script instead of an empty frame with a picker above it.
   const script = versions.find((v) => v.id === activeId) || versions[0] || null;
   const cues = cueSheets[show.id] || [];
+  const choreo = show.choreography || [];
+
+  // A marker written before there were kinds is a cue — it has a cueId and
+  // nothing else. Reading that as 'cue' costs one line and saves a migration.
+  const markerKind = (m) => m.kind || (m.cueId ? 'cue' : 'note');
   const [pageNum, setPageNum] = useState(1);
-  const [placingCueId, setPlacingCueId] = useState(null);
+  // What the next click on the page will drop. Three kinds share one surface:
+  // a cue from the cue sheet, a choreography number, or a free note. Null means
+  // clicking the page does nothing, which is the resting state.
+  const [placing, setPlacing] = useState(null);
+  const [noteDraft, setNoteDraft] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -188,19 +197,46 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
   }
 
   function handleCanvasClick(e) {
-    if (!placingCueId || !canvasRef.current) return;
+    if (!placing || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const xPct = (e.clientX - rect.left) / rect.width;
     const yPct = (e.clientY - rect.top) / rect.height;
-    const marker = { id: `mk-${Date.now()}`, cueId: placingCueId, page: pageNum, xPct, yPct };
+
+    const base = { id: `mk-${Date.now()}`, page: pageNum, xPct, yPct, kind: placing.kind };
+    let marker;
+    if (placing.kind === 'cue') marker = { ...base, cueId: placing.id };
+    else if (placing.kind === 'choreo') marker = { ...base, choreoId: placing.id };
+    else marker = { ...base, text: noteDraft.trim() || 'Note' };
+
     setShows((prev) =>
       prev.map((s) =>
         s.id === show.id
-          ? { ...s, scriptVersions: (s.scriptVersions || []).map((v) => (v.id === script.id ? { ...v, markers: [...(v.markers || []).filter((m) => m.cueId !== placingCueId), marker] } : v)) }
+          ? {
+              ...s,
+              scriptVersions: (s.scriptVersions || []).map((v) =>
+                v.id === script.id
+                  ? {
+                      ...v,
+                      markers: [
+                        // A cue or a number can only be in one place, so
+                        // re-placing it moves it. Notes are free to repeat —
+                        // "watch the trap" belongs on every page it matters on.
+                        ...(v.markers || []).filter(
+                          (m) =>
+                            placing.kind === 'note' ||
+                            (placing.kind === 'cue' ? m.cueId !== placing.id : m.choreoId !== placing.id)
+                        ),
+                        marker,
+                      ],
+                    }
+                  : v
+              ),
+            }
           : s
       )
     );
-    setPlacingCueId(null);
+    setPlacing(null);
+    setNoteDraft('');
   }
 
   function removeMarker(markerId) {
@@ -217,16 +253,45 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
       const outDoc = await PDFDocument.load(bytes);
       const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
       const pages = outDoc.getPages();
+      // #RRGGBB to pdf-lib's 0..1 triple. The colours are chosen on screen and
+      // have to survive onto paper unchanged, so they are converted rather than
+      // approximated.
+      const toRgb = (hex) => {
+        const h = String(hex || '#E8A33D').replace('#', '');
+        return rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
+      };
+
       (script.markers || []).forEach((marker) => {
         const page = pages[marker.page - 1];
         if (!page) return;
-        const cue = cues.find((c) => c.id === marker.cueId);
-        const label = cue ? cueCode(cue, CUE_DEPTS) : '?';
+        const face = markerFace(marker);
         const { width, height } = page.getSize();
         const x = marker.xPct * width;
         const y = height - marker.yPct * height;
-        page.drawCircle({ x, y, size: 9, color: rgb(0.91, 0.64, 0.24), opacity: 0.85 });
-        page.drawText(label, { x: x + 12, y: y - 4, size: 10, font, color: rgb(0.72, 0.47, 0.08) });
+        const color = toRgb(face.color);
+
+        if (face.kind === 'note') {
+          // A note is words, not a call. It gets a box it can be read out of
+          // rather than a dot someone has to decode.
+          const size = 8.5;
+          const textWidth = font.widthOfTextAtSize(face.label, size);
+          page.drawRectangle({
+            x: x - 3,
+            y: y - 4,
+            width: textWidth + 10,
+            height: size + 7,
+            color: rgb(1, 1, 1),
+            borderColor: color,
+            borderWidth: 1,
+            opacity: 0.92,
+          });
+          page.drawText(face.label, { x: x + 2, y: y, size, font, color: rgb(0.1, 0.12, 0.14) });
+          return;
+        }
+
+        const label = face.kind === 'choreo' ? `* ${face.label}` : face.label;
+        page.drawCircle({ x, y, size: 9, color, opacity: 0.85 });
+        page.drawText(label, { x: x + 12, y: y - 4, size: 10, font, color });
       });
       const outBytes = await outDoc.save();
       const blob = new Blob([outBytes], { type: 'application/pdf' });
@@ -395,6 +460,21 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
     );
   }
 
+  function markerFace(m) {
+    const kind = markerKind(m);
+    if (kind === 'choreo') {
+      const n = choreo.find((c) => c.id === m.choreoId);
+      return { label: n ? n.name || n.title || 'Number' : 'Number', color: '#C77DBF', kind };
+    }
+    if (kind === 'note') return { label: m.text || 'Note', color: '#9AA5B1', kind };
+    const cue = cues.find((c) => c.id === m.cueId);
+    return {
+      label: cue ? cueCode(cue, CUE_DEPTS) : '?',
+      color: cue ? deptColor(cue.dept, CUE_DEPTS) : COLOR.amber,
+      kind,
+    };
+  }
+
   const markersOnPage = (script.markers || []).filter((m) => m.page === pageNum);
 
   return (
@@ -470,12 +550,25 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
           </button>
         </div>
 
-        {placingCueId && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: COLOR.amberDim, borderRadius: 4, padding: '8px 12px', marginBottom: 10 }}>
+        {placing && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: COLOR.amberDim, borderRadius: 4, padding: '8px 12px', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
             <span className="td-mono" style={{ fontSize: 11, color: COLOR.amber, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Crosshair size={12} /> Click the script where {cueCode(cues.find((c) => c.id === placingCueId) || {}, CUE_DEPTS)} calls
+              <Crosshair size={12} />
+              {placing.kind === 'cue' && <>Click the script where {cueCode(cues.find((c) => c.id === placing.id) || {}, CUE_DEPTS)} calls</>}
+              {placing.kind === 'choreo' && <>Click where {(choreo.find((c) => c.id === placing.id) || {}).name || 'this number'} starts</>}
+              {placing.kind === 'note' && <>Type the note, then click where it goes</>}
             </span>
-            <button onClick={() => setPlacingCueId(null)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.amber, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}>
+            {placing.kind === 'note' && (
+              <input
+                autoFocus
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder="e.g. watch the trap"
+                className="td-focusable"
+                style={{ flex: '1 1 200px', background: COLOR.void, border: `1px solid ${COLOR.amber}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12, padding: '5px 9px' }}
+              />
+            )}
+            <button onClick={() => { setPlacing(null); setNoteDraft(''); }} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.amber, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}>
               Cancel
             </button>
           </div>
@@ -485,7 +578,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
-            style={{ display: 'block', maxWidth: '100%', height: 'auto', cursor: placingCueId ? 'crosshair' : 'default' }}
+            style={{ display: 'block', maxWidth: '100%', height: 'auto', cursor: placing ? 'crosshair' : 'default' }}
           />
           {rendering && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(11,14,17,0.6)' }}>
@@ -493,31 +586,37 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
             </div>
           )}
           {markersOnPage.map((m) => {
-            const cue = cues.find((c) => c.id === m.cueId);
+            const face = markerFace(m);
+            // Notes are squared off and quieter than cues; a note is context,
+            // not a thing anyone is waiting to be called.
+            const isNote = face.kind === 'note';
             return (
               <button
                 key={m.id}
                 onClick={() => removeMarker(m.id)}
                 className="td-focusable"
-                title="Click to remove"
+                title={`${face.label} — click to remove`}
                 style={{
                   position: 'absolute',
                   left: `${m.xPct * 100}%`,
                   top: `${m.yPct * 100}%`,
                   transform: 'translate(-50%, -50%)',
-                  background: COLOR.amber,
-                  color: COLOR.void,
-                  border: `2px solid ${COLOR.void}`,
-                  borderRadius: 20,
+                  background: isNote ? 'rgba(255,255,255,0.92)' : face.color,
+                  color: isNote ? '#1B1F24' : '#101317',
+                  border: `2px solid ${isNote ? face.color : COLOR.void}`,
+                  borderRadius: isNote ? 3 : 20,
                   padding: '2px 8px',
                   fontSize: 10,
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontWeight: 700,
                   whiteSpace: 'nowrap',
+                  maxWidth: 180,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                   cursor: 'pointer',
                 }}
               >
-                {cue ? cueCode(cue, CUE_DEPTS) : '?'}
+                {face.kind === 'choreo' ? `♪ ${face.label}` : face.label}
               </button>
             );
           })}
@@ -535,7 +634,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
               return (
                 <div key={cue.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="td-mono" style={{ fontSize: 11, color: COLOR.amber }}>{cueCode(cue, CUE_DEPTS)}</div>
+                    <div className="td-mono" style={{ fontSize: 11, color: deptColor(cue.dept, CUE_DEPTS) }}>{cueCode(cue, CUE_DEPTS)}</div>
                     <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cue.desc}</div>
                   </div>
                   {marker ? (
@@ -549,13 +648,13 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
                     </div>
                   ) : (
                     <button
-                      onClick={() => setPlacingCueId(cue.id)}
+                      onClick={() => setPlacing({ kind: 'cue', id: cue.id })}
                       className="td-focusable"
                       style={{
                         flexShrink: 0,
-                        background: placingCueId === cue.id ? COLOR.amber : 'transparent',
-                        color: placingCueId === cue.id ? COLOR.void : COLOR.amber,
-                        border: `1px solid ${COLOR.amber}`,
+                        background: placing && placing.id === cue.id ? deptColor(cue.dept, CUE_DEPTS) : 'transparent',
+                        color: placing && placing.id === cue.id ? COLOR.void : deptColor(cue.dept, CUE_DEPTS),
+                        border: `1px solid ${deptColor(cue.dept, CUE_DEPTS)}`,
                         borderRadius: 3,
                         padding: '4px 9px',
                         fontSize: 10.5,
@@ -573,6 +672,59 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
         ) : (
           <StubPanel label="No cues on this show's cue sheet yet — add them on Run of Show first" hint="Cues are created on Run of Show. Once they exist, come back here to place each one on the actual script page and export an annotated copy for the book." />
         )}
+
+        <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em', margin: '22px 0 10px' }}>
+          CHOREOGRAPHY
+        </div>
+        {choreo.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {choreo.map((n) => {
+              const marker = (script.markers || []).find((m) => m.choreoId === n.id);
+              return (
+                <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name || 'Untitled number'}</div>
+                    {n.notes && <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.notes}</div>}
+                  </div>
+                  {marker ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                      <button onClick={() => setPageNum(marker.page)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.green, fontSize: 10, cursor: 'pointer' }}>p.{marker.page}</button>
+                      <button onClick={() => removeMarker(marker.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 9.5, cursor: 'pointer', textDecoration: 'underline' }}>remove</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setPlacing({ kind: 'choreo', id: n.id })}
+                      className="td-focusable"
+                      style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', color: '#C77DBF', border: '1px solid #C77DBF', borderRadius: 3, padding: '4px 9px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      <Footprints size={11} /> Place
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <StubPanel label="No numbers on this show yet" hint="Choreography numbers are built on the Choreography page. Once they exist, drop each one on the script page where it starts." />
+        )}
+
+        <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em', margin: '22px 0 10px' }}>
+          NOTES ON THE PAGE
+        </div>
+        <button
+          onClick={() => setPlacing({ kind: 'note', id: null })}
+          className="td-focusable"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', justifyContent: 'center', background: 'transparent', color: COLOR.textMuted, border: `1px dashed ${COLOR.line}`, borderRadius: 4, padding: '8px 10px', fontSize: 11.5, cursor: 'pointer', marginBottom: 8 }}
+        >
+          <StickyNote size={12} /> Add a note to this page
+        </button>
+        {(script.markers || []).filter((m) => markerKind(m) === 'note').map((m) => (
+          <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, marginBottom: 6 }}>
+            <span className="td-body" style={{ flex: 1, fontSize: 11, color: COLOR.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.text}</span>
+            <button onClick={() => setPageNum(m.page)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.green, fontSize: 10, cursor: 'pointer', flexShrink: 0 }}>p.{m.page}</button>
+            <button onClick={() => removeMarker(m.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 9.5, cursor: 'pointer', textDecoration: 'underline', flexShrink: 0 }}>remove</button>
+          </div>
+        ))}
       </div>
     </div>
     </div>

@@ -94,13 +94,25 @@ async function idbSet(key, value) {
 }
 
 // Icon-bearing taxonomy <-> plain-JSON conversion.
+// Taxonomies are stored label-only because a lucide icon component is not
+// JSON. Cue departments now also carry a colour, so an entry is written as
+// { label, color } — and read back tolerating the bare string that older rows
+// still hold, since a taxonomy that throws on old data takes the app with it.
 function serializeTaxonomy(map) {
-  return Object.fromEntries(Object.entries(map).map(([key, entry]) => [key, entry.label]));
+  return Object.fromEntries(
+    Object.entries(map).map(([key, entry]) => [key, entry.color ? { label: entry.label, color: entry.color } : entry.label])
+  );
 }
 function deserializeTaxonomy(initialMap, fallbackIcon, labelMap) {
   const result = {};
-  Object.entries(labelMap || {}).forEach(([key, label]) => {
-    result[key] = { label, icon: (initialMap[key] && initialMap[key].icon) || fallbackIcon };
+  Object.entries(labelMap || {}).forEach(([key, stored]) => {
+    const label = typeof stored === 'string' ? stored : stored?.label;
+    const color = typeof stored === 'string' ? undefined : stored?.color;
+    result[key] = {
+      label,
+      icon: (initialMap[key] && initialMap[key].icon) || fallbackIcon,
+      ...(color || initialMap[key]?.color ? { color: color || initialMap[key].color } : {}),
+    };
   });
   return result;
 }
