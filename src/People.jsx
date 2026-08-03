@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Mic, Pencil, Plus, Settings, UserMinus, X } from 'lucide-react';
+import { Mail, MailWarning, Mic, Pencil, Phone, Plus, Settings, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { assignmentFor } from './shared.jsx';
@@ -257,6 +257,8 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
   const history = show ? (person.assignments || []).filter((a) => a.showId !== show.id) : (person.assignments || []);
   const [draft, setDraft] = useState({
     name: person.name,
+    phone: person.phone || '',
+    email: person.email || '',
     roleTitle: assignment?.roleTitle || '',
     category: assignment?.category || categoryOrder[0],
     miced: assignment?.miced || false,
@@ -280,6 +282,8 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
   function startEdit() {
     setDraft({
       name: person.name,
+      phone: person.phone || '',
+      email: person.email || '',
       roleTitle: assignment?.roleTitle || '',
       category: assignment?.category || categoryOrder[0],
       miced: assignment?.miced || false,
@@ -306,7 +310,8 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
     setPeople((prev) =>
       prev.map((p) => {
         if (p.id !== person.id) return p;
-        if (!show) return { ...p, name: draft.name.trim() };
+        const contact = { name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim() };
+        if (!show) return { ...p, ...contact };
         const others = (p.assignments || []).filter((a) => a.showId !== show.id);
         const newAssignment = {
           id: assignment?.id || `asn-${p.id}-${show.id}`,
@@ -318,7 +323,7 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
           electric: draft.electric,
           monitorMix: draft.monitorMix,
         };
-        return { ...p, name: draft.name.trim(), assignments: [...others, newAssignment] };
+        return { ...p, ...contact, assignments: [...others, newAssignment] };
       })
     );
     setEditing(false);
@@ -365,6 +370,28 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
               </div>
             </>
           )}
+        </div>
+
+        {/* Contact details. The email is not decoration: it is what the claim
+            flow matches on when this person signs in, and without it their
+            account can never be linked to this roster entry. Cast can't read
+            anyone's but their own — see 09-contact-privacy.sql. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div>
+            <label className="td-mono" style={labelStyle}>PHONE</label>
+            <input className="td-focusable" style={inputStyle} value={draft.phone} placeholder="Optional" onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
+          </div>
+          <div>
+            <label className="td-mono" style={labelStyle}>EMAIL</label>
+            <input
+              className="td-focusable"
+              style={inputStyle}
+              type="email"
+              value={draft.email}
+              placeholder="Matches their sign-in to this roster entry"
+              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+            />
+          </div>
         </div>
         {show && <AudioOptionsFields audioOptions={audioOptions} value={draft} onChange={setDraft} />}
         {history.length > 0 && (
@@ -443,6 +470,25 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {person.phone && (
+          <a href={`tel:${person.phone}`} className="td-focusable" style={{ color: COLOR.textFaint }} aria-label={`Call ${person.name}`}>
+            <Phone size={13} strokeWidth={1.75} />
+          </a>
+        )}
+        {person.email ? (
+          <a href={`mailto:${person.email}`} className="td-focusable" style={{ color: COLOR.textFaint }} aria-label={`Email ${person.name}`}>
+            <Mail size={13} strokeWidth={1.75} />
+          </a>
+        ) : (
+          // No email means this person can never claim their account: the sign-in
+          // address has nothing to match against. Worth seeing at a glance.
+          <span
+            title={`No email for ${person.name}. Without one they can't link their account to this roster entry.`}
+            style={{ color: COLOR.amberDim, display: 'flex' }}
+          >
+            <MailWarning size={13} strokeWidth={1.75} />
+          </span>
+        )}
         {Icon && <Icon size={13} color={COLOR.textFaint} strokeWidth={1.75} />}
         {show && assignment && (
           confirmingRemove ? (
@@ -552,6 +598,8 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
 // ---------------------------------------------------------------------------
 export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions, onAdd, onClose }) {
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
   const [category, setCategory] = useState(categoryOrder[0]);
   const [audioFields, setAudioFields] = useState({ miced: false, micType: '', electric: false, monitorMix: false });
@@ -609,6 +657,17 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
         )}
       </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>PHONE</label>
+          <input className="td-focusable" style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>EMAIL</label>
+          <input className="td-focusable" style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="The address they'll sign in with" />
+        </div>
+      </div>
+
       {show && <AudioOptionsFields audioOptions={audioOptions} value={audioFields} onChange={setAudioFields} />}
 
       <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, marginTop: 12 }}>
@@ -623,6 +682,8 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
         onClick={() =>
           onAdd({
             name: name.trim(),
+            phone: phone.trim(),
+            email: email.trim(),
             roleTitle: roleTitle.trim(),
             category,
             ...audioFields,
@@ -652,20 +713,20 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
 export function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurrentUserId, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions }) {
   const [showForm, setShowForm] = useState(false);
 
-  function handleManualAdd({ name, roleTitle, category, ...audioFields }) {
+  function handleManualAdd({ name, phone, email, roleTitle, category, ...audioFields }) {
     const existing = people.find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (show) {
       if (existing) {
         const newAssignment = { id: `asn-${existing.id}-${show.id}`, showId: show.id, roleTitle, category, ...audioFields };
-        setPeople((prev) => prev.map((p) => (p.id === existing.id ? { ...p, assignments: [...(p.assignments || []).filter((a) => a.showId !== show.id), newAssignment] } : p)));
+        setPeople((prev) => prev.map((p) => (p.id === existing.id ? { ...p, phone: phone || p.phone, email: email || p.email, assignments: [...(p.assignments || []).filter((a) => a.showId !== show.id), newAssignment] } : p)));
       } else {
         const newId = `p${Date.now()}`;
         const newAssignment = { id: `asn-${newId}-${show.id}`, showId: show.id, roleTitle, category, ...audioFields };
-        setPeople((prev) => [...prev, { id: newId, name, assignments: [newAssignment] }]);
+        setPeople((prev) => [...prev, { id: newId, name, phone, email, assignments: [newAssignment] }]);
       }
     } else if (!existing) {
       const newId = `p${Date.now()}`;
-      setPeople((prev) => [...prev, { id: newId, name, assignments: [] }]);
+      setPeople((prev) => [...prev, { id: newId, name, phone, email, assignments: [] }]);
     }
     setShowForm(false);
   }
