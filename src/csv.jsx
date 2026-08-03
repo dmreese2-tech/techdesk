@@ -72,7 +72,7 @@ export function ExportCsvButton({ filename, rows, label = 'Export CSV', title })
   return (
     <button
       onClick={onClick}
-      className="td-focusable"
+      className="td-focusable td-export"
       title={title || 'Download this section as a spreadsheet'}
       style={{
         display: 'flex',

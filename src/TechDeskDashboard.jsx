@@ -19,6 +19,8 @@ import { supabase } from './supabaseClient.js';
 import { CharactersPanel } from './Characters.jsx';
 import { TopBar } from './TopBar.jsx';
 import { ClaimBanner } from './Claim.jsx';
+import { ReadOnlyGate, PermissionDeniedToast, SECTION_MODULE } from './ReadOnly.jsx';
+import { loadMyPermissions } from './permissions.js';
 
 // ---------------------------------------------------------------------------
 // PERSISTENCE — two stores, doing two different jobs.
@@ -114,7 +116,15 @@ function localWriteRecent() {
   return localWrites.inFlight > 0 || Date.now() - localWrites.lastFinishedAt < SELF_ECHO_QUIET_MS;
 }
 
-function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError) {
+// Postgres says 42501 for a row-level security refusal; PostgREST passes the
+// code straight through. Anything else is a genuine fault and keeps the old
+// quiet flag, because "check your connection" is not the same message as
+// "this isn't yours to edit".
+function isPermissionDenial(error) {
+  return error?.code === '42501' || /row-level security|permission denied/i.test(error?.message || '');
+}
+
+function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError, onDenied) {
   const prevIdsRef = useRef(null);
   useEffect(() => {
     if (!hydrated) return undefined;
@@ -129,7 +139,13 @@ function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSa
           prevIdsRef.current = currentIds;
           setLastSavedAt(new Date());
         })
-        .catch(() => setPersistenceError(true))
+        .catch((error) => {
+          if (isPermissionDenial(error) && onDenied) {
+            onDenied(error);
+            return;
+          }
+          setPersistenceError(true);
+        })
         .finally(() => {
           localWrites.inFlight -= 1;
           localWrites.lastFinishedAt = Date.now();
@@ -379,8 +395,24 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // Without this, every non-admin's debounced settings save would 403 on
   // loop and light up the persistence warning for something they never did.
   const [isAdmin, setIsAdmin] = useState(null);
+  // What this person may write, resolved by the database rather than
+  // recomputed here — see docs/permissions.md. Null until it has been asked.
+  const [canWrite, setCanWrite] = useState(null);
+  const [deniedMessage, setDeniedMessage] = useState('');
   // On a phone the rail is a drawer over the content rather than a column
   // beside it; on a desktop it stays put and this flag is ignored.
+  // Whether the section on screen is editable. Unknown counts as editable so
+  // nothing flashes grey while the answer is still in flight; the database is
+  // the one that actually refuses, and this only spares people the surprise.
+  const sectionModule = SECTION_MODULE[active] || null;
+  const sectionWritable = (() => {
+    if (active === 'settings') return isAdmin !== false;
+    if (!sectionModule) return true;
+    if (canWrite === null) return true;
+    if (active === 'inventory') return canWrite.inventoryCategories.size > 0;
+    return !!canWrite.byShow[currentShowId]?.has(sectionModule);
+  })();
+
   const isNarrow = useIsNarrow();
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(() => {
@@ -461,6 +493,14 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             .eq('user_id', u.user.id)
             .maybeSingle()
             .then(({ data: m }) => setIsAdmin(m?.tier === 'admin'));
+        });
+        loadMyPermissions(orgId)
+          .then(setCanWrite)
+          .catch(() => {
+            // If the permission tables can't be read, assume nothing and let
+            // the database do the refusing. Better a greyed-out section than
+            // a form that silently discards work.
+            setCanWrite({ byShow: {}, inventoryCategories: new Set() });
         });
         setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS)));
         setDepartmentOrder(data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER);
@@ -548,13 +588,17 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // Shared production data — each collection syncs independently, and each
   // diffs against what it saved last time so removed rows actually get
   // deleted server-side instead of quietly sticking around forever.
-  useSyncedCollection(hydrated, shows, (s) => s.id, (items) => saveShows(items, orgId), deleteShows, setLastSavedAt, setPersistenceError);
-  useSyncedCollection(hydrated, crew, (p) => p.id, (items) => savePeople('crew', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
-  useSyncedCollection(hydrated, actors, (p) => p.id, (items) => savePeople('actor', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
-  useSyncedCollection(hydrated, staff, (p) => p.id, (items) => savePeople('staff', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
-  useSyncedCollection(hydrated, musicians, (p) => p.id, (items) => savePeople('musician', items, orgId), deletePeople, setLastSavedAt, setPersistenceError);
-  useSyncedCollection(hydrated, calls, (c) => c.id, (items) => saveCalls(items, orgId), deleteCalls, setLastSavedAt, setPersistenceError);
-  useSyncedCollection(hydrated, inventory, (i) => i.id, (items) => saveInventory(items, orgId), deleteInventory, setLastSavedAt, setPersistenceError);
+  const reportDenied = React.useCallback(
+    () => setDeniedMessage("That change wasn't saved — this section isn't yours to edit. Reload to see where it stands."),
+    []
+  );
+  useSyncedCollection(hydrated, shows, (s) => s.id, (items) => saveShows(items, orgId), deleteShows, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, crew, (p) => p.id, (items) => savePeople('crew', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, actors, (p) => p.id, (items) => savePeople('actor', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, staff, (p) => p.id, (items) => savePeople('staff', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, musicians, (p) => p.id, (items) => savePeople('musician', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, calls, (c) => c.id, (items) => saveCalls(items, orgId), deleteCalls, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, inventory, (i) => i.id, (items) => saveInventory(items, orgId), deleteInventory, setLastSavedAt, setPersistenceError, reportDenied);
 
   // Cue sheets: keyed by show, replaced wholesale per show on change —
   // simpler and safe since only one department is ever editing a given
@@ -778,6 +822,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
       {FONTS}
       <TopBar orgId={orgId} section={active} orgLogo={orgLogo} />
       <ClaimBanner orgId={orgId} />
+      <PermissionDeniedToast message={deniedMessage} onDismiss={() => setDeniedMessage('')} />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <Sidebar
         active={active}
@@ -829,6 +874,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           {!isNarrow && <HouseClock />}
         </div>
 
+        <ReadOnlyGate writable={sectionWritable} module={sectionModule} admin={active === 'settings'}>
         {active === 'dashboard' && (
           <>
             <GetStarted
@@ -1099,6 +1145,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             setOrgLogo={setOrgLogo}
           />
         )}
+        </ReadOnlyGate>
       </div>
       </div>
     </div>
