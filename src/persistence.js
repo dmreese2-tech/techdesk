@@ -19,7 +19,56 @@ import { supabase } from './supabaseClient.js';
 // Shape conversion — DB rows (snake_case, relational) <-> the JS shapes the
 // rest of the app already works with (camelCase, nested).
 // ---------------------------------------------------------------------------
-function showRowToJs(row) {
+// ---------------------------------------------------------------------------
+// THE SHOW'S CONTENTS LIVE IN `show_items`, ONE ROW PER ITEM
+//
+// These nine used to be JSONB columns on the show. They are rows now, for two
+// reasons: row-level security can gate a row and not a column, so per-module
+// permissions were unsayable; and saving the whole show row on every edit made
+// two people editing different modules overwrite each other.
+//
+// The app's shape doesn't change at all — `show.props` is still an array of
+// props. Only what happens underneath it does.
+// ---------------------------------------------------------------------------
+const SHOW_MODULES = {
+  schedule: 'schedule',
+  scenes: 'acts',
+  characters: 'characters',
+  choreography: 'choreography',
+  costumes: 'costumes',
+  props: 'props',
+  set: 'setPieces',
+  audio: 'soundEffects',
+  groups: 'groups',
+};
+
+// What we last wrote, per show and module, by array identity. Modules update
+// immutably, so editing props gives props a new array and leaves costumes
+// pointing at the same one — which is exactly the signal needed to write only
+// what changed. A false positive costs one redundant upsert; there are no
+// false negatives, because you cannot edit an array without replacing it.
+const savedModules = new Map();
+const moduleKey = (showId, module) => `${showId}:${module}`;
+
+function itemsToShowFields(rows) {
+  const byShow = {};
+  (rows || []).forEach((row) => {
+    if (!byShow[row.show_id]) byShow[row.show_id] = {};
+    const bucket = byShow[row.show_id];
+    if (!bucket[row.module]) bucket[row.module] = [];
+    bucket[row.module].push(row);
+  });
+  Object.values(byShow).forEach((bucket) => {
+    Object.keys(bucket).forEach((module) => {
+      bucket[module] = bucket[module]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((row) => ({ ...row.data, id: row.id }));
+    });
+  });
+  return byShow;
+}
+
+function showRowToJs(row, itemsForShow) {
   const meta = row.script_meta || null;
   return {
     id: row.id,
@@ -31,15 +80,19 @@ function showRowToJs(row) {
     openDate: row.open_date,
     crewCallToday: row.crew_call_today,
     headcountToday: row.headcount_today,
-    schedule: row.schedule || [],
-    soundEffects: row.sound_effects || [],
-    choreography: row.choreography || [],
-    acts: row.acts || [],
-    characters: row.characters || [],
-    setPieces: row.set_pieces || [],
-    costumes: row.costumes || [],
-    props: row.props || [],
-    groups: row.groups || [],
+    // A show with no rows at all hasn't been migrated yet (or is brand new),
+    // so read the old columns. Once it has any row, the table is the truth —
+    // otherwise deleting the last prop would resurrect the column's copy.
+    schedule: itemsForShow ? itemsForShow.schedule || [] : row.schedule || [],
+    soundEffects: itemsForShow ? itemsForShow.audio || [] : row.sound_effects || [],
+    choreography: itemsForShow ? itemsForShow.choreography || [] : row.choreography || [],
+    acts: itemsForShow ? itemsForShow.scenes || [] : row.acts || [],
+    characters: itemsForShow ? itemsForShow.characters || [] : row.characters || [],
+    setPieces: itemsForShow ? itemsForShow.set || [] : row.set_pieces || [],
+    costumes: itemsForShow ? itemsForShow.costumes || [] : row.costumes || [],
+    props: itemsForShow ? itemsForShow.props || [] : row.props || [],
+    groups: itemsForShow ? itemsForShow.groups || [] : row.groups || [],
+
     script: meta ? { ...meta, pdfBytes: null } : null, // bytes fetched separately, on demand, from Storage
   };
 }
@@ -55,15 +108,6 @@ function showJsToRow(show, orgId) {
     open_date: show.openDate || null,
     crew_call_today: show.crewCallToday,
     headcount_today: show.headcountToday,
-    schedule: show.schedule || [],
-    sound_effects: show.soundEffects || [],
-    choreography: show.choreography || [],
-    acts: show.acts || [],
-    characters: show.characters || [],
-    set_pieces: show.setPieces || [],
-    costumes: show.costumes || [],
-    props: show.props || [],
-    groups: show.groups || [],
     script_meta: show.script ? { fileName: show.script.fileName, pageCount: show.script.pageCount, markers: show.script.markers } : null,
   };
 }
@@ -148,20 +192,32 @@ function settingsRowToJs(row) {
 // Load everything for an org in one pass.
 // ---------------------------------------------------------------------------
 export async function loadOrgData(orgId) {
-  const [showsRes, peopleRes, callsRes, itemsRes, cuesRes, settingsRes] = await Promise.all([
+  const [showsRes, showItemsRes, peopleRes, callsRes, itemsRes, cuesRes, settingsRes] = await Promise.all([
     supabase.from('shows').select('*').eq('org_id', orgId),
+    supabase.from('show_items').select('*').eq('org_id', orgId),
     supabase.from('people').select('*').eq('org_id', orgId),
     supabase.from('calls').select('*').eq('org_id', orgId),
     supabase.from('inventory_items').select('*').eq('org_id', orgId),
     supabase.from('cues').select('*').eq('org_id', orgId),
     supabase.from('org_settings').select('*').eq('org_id', orgId).maybeSingle(),
   ]);
-  const firstError = [showsRes, peopleRes, callsRes, itemsRes, cuesRes, settingsRes].find((r) => r.error)?.error;
+  const firstError = [showsRes, showItemsRes, peopleRes, callsRes, itemsRes, cuesRes, settingsRes].find((r) => r.error)?.error;
   if (firstError) throw firstError;
 
   const people = peopleRes.data || [];
+  const itemsByShow = itemsToShowFields(showItemsRes.data);
+  const shows = (showsRes.data || []).map((row) => showRowToJs(row, itemsByShow[row.id]));
+
+  // A fresh load is the truth; forget anything we thought we had written, so
+  // the next save compares against what the database actually holds.
+  savedModules.clear();
+  shows.forEach((show) => {
+    Object.entries(SHOW_MODULES).forEach(([module, field]) => {
+      savedModules.set(moduleKey(show.id, module), show[field]);
+    });
+  });
   return {
-    shows: (showsRes.data || []).map(showRowToJs),
+    shows: shows,
     crew: people.filter((p) => p.kind === 'crew').map(personRowToJs),
     actors: people.filter((p) => p.kind === 'actor').map(personRowToJs),
     staff: people.filter((p) => p.kind === 'staff').map(personRowToJs),
@@ -179,10 +235,53 @@ export async function loadOrgData(orgId) {
 // its own debounced effect in TechDeskDashboard.jsx, only firing when that
 // specific slice of state actually changes.
 // ---------------------------------------------------------------------------
+// PostgREST wants a parenthesised, quoted list for `not.in`.
+function inList(ids) {
+  return `(${ids.map((id) => `"${String(id).replace(/"/g, '""')}"`).join(',')})`;
+}
+
+// Replace one module's items for one show: upsert what's there now, delete
+// whatever used to be and isn't. Scoped to (show, module), so a props edit
+// never touches a costume row and the two can happen at the same time.
+async function saveShowModule(showId, module, items, orgId) {
+  const rows = items.map((item, index) => ({
+    id: item.id,
+    org_id: orgId,
+    show_id: showId,
+    module,
+    data: item,
+    sort_order: index,
+  }));
+
+  let del = supabase.from('show_items').delete().eq('show_id', showId).eq('module', module);
+  if (rows.length > 0) del = del.not('id', 'in', inList(rows.map((r) => r.id)));
+  const { error: delErr } = await del;
+  if (delErr) throw delErr;
+
+  if (rows.length === 0) return;
+  const { error } = await supabase.from('show_items').upsert(rows);
+  if (error) throw error;
+}
+
 export async function saveShows(shows, orgId) {
   if (shows.length === 0) return;
   const { error } = await supabase.from('shows').upsert(shows.map((s) => showJsToRow(s, orgId)));
   if (error) throw error;
+
+  const writes = [];
+  shows.forEach((show) => {
+    Object.entries(SHOW_MODULES).forEach(([module, field]) => {
+      const items = show[field] || [];
+      const key = moduleKey(show.id, module);
+      if (savedModules.get(key) === items) return;
+      writes.push(
+        saveShowModule(show.id, module, items, orgId).then(() => {
+          savedModules.set(key, items);
+        })
+      );
+    });
+  });
+  await Promise.all(writes);
 }
 export async function deleteShows(ids) {
   if (ids.length === 0) return;
@@ -308,6 +407,7 @@ export function subscribeToOrgChanges(orgId, onChange) {
   const channel = supabase
     .channel(`org-${orgId}-changes`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shows', filter: `org_id=eq.${orgId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'show_items', filter: `org_id=eq.${orgId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'people', filter: `org_id=eq.${orgId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `org_id=eq.${orgId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `org_id=eq.${orgId}` }, onChange)
