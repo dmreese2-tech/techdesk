@@ -20,6 +20,7 @@ import { CharactersPanel } from './Characters.jsx';
 import { TopBar } from './TopBar.jsx';
 import { ClaimBanner } from './Claim.jsx';
 import { ReadOnlyGate, PermissionDeniedToast, SECTION_MODULE } from './ReadOnly.jsx';
+import { NoProductions } from './NoProductions.jsx';
 import { loadMyPermissions } from './permissions.js';
 
 // ---------------------------------------------------------------------------
@@ -398,6 +399,9 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // What this person may write, resolved by the database rather than
   // recomputed here — see docs/permissions.md. Null until it has been asked.
   const [canWrite, setCanWrite] = useState(null);
+  // The roster entry this account is linked to, if any. Undefined until asked,
+  // null if the account isn't linked to anybody.
+  const [me, setMe] = useState(undefined);
   const [deniedMessage, setDeniedMessage] = useState('');
   // On a phone the rail is a drawer over the content rather than a column
   // beside it; on a desktop it stays put and this flag is ignored.
@@ -483,6 +487,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             .eq('user_id', u.user.id)
             .maybeSingle()
             .then(({ data: m }) => setIsAdmin(m?.tier === 'admin'));
+          supabase
+            .from('people_view')
+            .select('id, name, assignments')
+            .eq('org_id', orgId)
+            .eq('user_id', u.user.id)
+            .maybeSingle()
+            .then(({ data: person }) => setMe(person || null));
         });
         loadMyPermissions(orgId)
           .then(setCanWrite)
@@ -807,6 +818,22 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     settings: { eyebrow: 'SHOP SETTINGS', title: 'Board Configuration' },
   };
   const header = headerConfig[active] || headerConfig.dashboard;
+
+  // Taken off every show. The account still works and they're still a member —
+  // there is simply nothing assigned to them, so there is nothing to show.
+  //
+  // Three guards, and all three matter. Admins never see it, because running
+  // the company is not the same as being cast in it. Anyone whose account
+  // isn't linked to a roster entry never sees it either — `me === null` is
+  // "we don't know who you are", not "you have no work", and treating those
+  // the same would lock out every member who hasn't claimed themselves yet.
+  // And it waits for the answer rather than guessing while it loads.
+  const onNoProductions =
+    isAdmin === false && me && (me.assignments || []).length === 0;
+
+  if (hydrated && onNoProductions) {
+    return <NoProductions personName={me.name} onSignOut={onSignOut} />;
+  }
 
   if (!hydrated) {
     return (

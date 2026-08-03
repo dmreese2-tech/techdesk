@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Mail, Pencil, Phone, Plus, Settings, X } from 'lucide-react';
+import { Mail, Pencil, Phone, Plus, Settings, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { assignmentFor } from './shared.jsx';
@@ -13,6 +13,7 @@ import { StubPanel } from './ui.jsx';
 // ---------------------------------------------------------------------------
 export function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMENT_ORDER }) {
   const [editing, setEditing] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const assignment = show ? assignmentFor(member, show.id) : null;
   const history = show ? (member.assignments || []).filter((a) => a.showId !== show.id) : (member.assignments || []);
   const [draft, setDraft] = useState({
@@ -44,6 +45,20 @@ export function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMEN
     });
     setEditing(true);
   }
+  // Take them off this production, not out of the company. They stay on the
+  // roster with their history intact and reappear under "not on this show",
+  // one click from being added back next season.
+  function takeOffShow() {
+    setCrew((prev) =>
+      prev.map((m) =>
+        m.id === member.id
+          ? { ...m, assignments: (m.assignments || []).filter((a) => a.showId !== show.id) }
+          : m
+      )
+    );
+    setConfirmingRemove(false);
+  }
+
   function save() {
     setCrew((prev) =>
       prev.map((m) => {
@@ -173,6 +188,29 @@ export function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMEN
         <a href={`mailto:${member.email}`} className="td-focusable" style={{ color: COLOR.textFaint }} aria-label={`Email ${member.name}`}>
           <Mail size={13} strokeWidth={1.75} />
         </a>
+        {show && assignment && (
+          confirmingRemove ? (
+            <>
+              <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber }}>OFF {show.title.toUpperCase()}?</span>
+              <button onClick={takeOffShow} className="td-focusable" style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '3px 9px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
+                Remove
+              </button>
+              <button onClick={() => setConfirmingRemove(false)} className="td-focusable" style={{ background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 9px', fontSize: 10.5, cursor: 'pointer' }}>
+                Keep
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmingRemove(true)}
+              className="td-focusable"
+              title={`Take ${member.name} off ${show.title}. They stay on the company roster.`}
+              aria-label={`Take ${member.name} off ${show.title}`}
+              style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+            >
+              <UserMinus size={13} strokeWidth={1.75} />
+            </button>
+          )
+        )}
         {!show || assignment ? (
           <button onClick={startEdit} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label={`Edit ${member.name}`}>
             <Pencil size={13} strokeWidth={1.75} />
