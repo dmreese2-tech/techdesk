@@ -4,6 +4,7 @@ import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
 import { PositionsPanel } from './Positions.jsx';
+import { PositionPermissionsPanel } from './PositionPermissions.jsx';
 
 // SETTINGS — venues, storage locations, instruments, positions and every
 // category taxonomy that feeds the pickers elsewhere.
@@ -725,6 +726,15 @@ export function SettingsModule({
       {/* Members */}
         {/* Positions */}
         <PositionsPanel positions={positions} setPositions={setPositions} />
+
+        {/* What each position can edit */}
+        <PositionPermissionsPanel
+          orgId={orgId}
+          positions={positions}
+          inventoryCategories={INVENTORY_CATEGORIES}
+          sectionTitle={sectionTitle}
+          sectionNote={sectionNote}
+        />
 
         <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
 
