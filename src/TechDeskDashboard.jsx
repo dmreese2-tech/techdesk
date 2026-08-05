@@ -531,7 +531,11 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         setCueDeptOrder(data.settings.cueDeptOrder.length ? data.settings.cueDeptOrder : Object.keys(INITIAL_CUE_DEPTS));
 
         const local = (await idbGet('deviceState')) || {};
-        setCurrentShowId(local.currentShowId ?? null);
+        // Fall back to the first production rather than none. A new account on
+        // a new machine has no device state, and landing on "no show selected"
+        // makes a working app look broken.
+        const known = (data.shows || []).some((sh) => sh.id === local.currentShowId);
+        setCurrentShowId(known ? local.currentShowId : (data.shows[0] ? data.shows[0].id : null));
         setCurrentUserId(local.currentUserId ?? null);
         setCurrentActorId(local.currentActorId ?? null);
         setCurrentStaffId(local.currentStaffId ?? null);
@@ -612,6 +616,11 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     if (!sectionModule) return true;
     if (canWrite === null) return true;
     if (active === 'inventory') return canWrite.inventoryCategories.size > 0;
+    // No show picked yet — which is where every new person starts, because the
+    // selection lives on the device, not the account. Permissions are answered
+    // per production, so there is no question to answer here; gating on it
+    // silently locked new users, admins included, out of the whole app.
+    if (!currentShowId) return true;
     return !!canWrite.byShow[currentShowId]?.has(sectionModule);
   })();
 

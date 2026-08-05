@@ -19,6 +19,7 @@ const TIER_META = {
 export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const [members, setMembers] = useState(null);
   const [claims, setClaims] = useState([]);
+  const [unclaimed, setUnclaimed] = useState([]);
   const [me, setMe] = useState(null);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -36,6 +37,8 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
     // Admin-only, and it fails harmlessly for everyone else.
     const { data: claimData } = await supabase.rpc('org_pending_claims', { check_org_id: orgId });
     setClaims(claimData || []);
+    const { data: freeData } = await supabase.rpc('org_unclaimed_people', { check_org_id: orgId });
+    setUnclaimed(freeData || []);
   };
 
   useEffect(() => {
@@ -63,6 +66,25 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const decideClaim = async (claim, approve) => {
     setBusyId(claim.id);
     const { error: err } = await supabase.rpc('decide_person_claim', { claim_id: claim.id, approve });
+    setBusyId(null);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    load();
+  };
+
+  // Waiting for someone to claim themselves is the right default for a cast of
+  // forty. It is the wrong one for the four people sitting in the room with
+  // you, so an admin can just say who is who.
+  const linkTo = async (member, personId) => {
+    if (!personId) return;
+    setBusyId(member.user_id);
+    const { error: err } = await supabase
+      .from('people')
+      .update({ user_id: member.user_id })
+      .eq('org_id', orgId)
+      .eq('id', personId);
     setBusyId(null);
     if (err) {
       setError(err.message);
@@ -161,7 +183,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                   {m.person_name ? (
                     <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}> — {m.person_name}</span>
                   ) : (
-                    <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}> NOT ON THE ROSTER</span>
+                    <span className="td-mono" style={{ fontSize: 10, color: COLOR.amberDim }}> NOT LINKED</span>
                   )}
                 </span>
                 <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
@@ -182,6 +204,21 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                   </select>
                 ) : (
                   <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{TIER_META[tier]?.label.toUpperCase() || tier.toUpperCase()}</span>
+                )}
+                {iAmAdmin && !m.person_id && (
+                  <select
+                    className="td-focusable"
+                    value=""
+                    disabled={busyId === m.user_id || unclaimed.length === 0}
+                    onChange={(e) => linkTo(m, e.target.value)}
+                    title="Attach this account to someone on the Crew, Actors, Musicians or Staff roster. Until then their positions grant nothing."
+                    style={{ background: COLOR.void, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11.5, padding: '4px 6px', maxWidth: 190 }}
+                  >
+                    <option value="">{unclaimed.length ? 'Link to roster…' : 'Nobody unlinked'}</option>
+                    {unclaimed.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} — {p.kind}</option>
+                    ))}
+                  </select>
                 )}
                 {iAmAdmin && m.person_id && (
                   <button
