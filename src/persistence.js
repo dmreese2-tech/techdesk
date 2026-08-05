@@ -117,7 +117,10 @@ function showJsToRow(show, orgId) {
 }
 
 function personRowToJs(row) {
-  return { id: row.id, name: row.name, phone: row.phone, email: row.email, assignments: row.assignments || [] };
+  // userId comes along so the roster can warn before deleting somebody whose
+  // account is attached to them. It is never edited here — linking and
+  // unlinking happen in Settings.
+  return { id: row.id, name: row.name, phone: row.phone, email: row.email, userId: row.user_id || null, assignments: row.assignments || [] };
 }
 function personJsToRow(person, kind, orgId) {
   return { id: person.id, org_id: orgId, kind, name: person.name, phone: person.phone || null, email: person.email || null, assignments: person.assignments || [] };

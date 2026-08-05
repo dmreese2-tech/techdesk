@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Mail, Pencil, Phone, Plus, Settings, UserMinus, X } from 'lucide-react';
+import { Mail, Pencil, Phone, Plus, Settings, Trash2, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { assignmentFor } from './shared.jsx';
@@ -14,6 +14,7 @@ import { StubPanel } from './ui.jsx';
 export function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMENT_ORDER }) {
   const [editing, setEditing] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const assignment = show ? assignmentFor(member, show.id) : null;
   const history = show ? (member.assignments || []).filter((a) => a.showId !== show.id) : (member.assignments || []);
   const [draft, setDraft] = useState({
@@ -57,6 +58,14 @@ export function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMEN
       )
     );
     setConfirmingRemove(false);
+  }
+
+  // Out of the company entirely. Every show, every history, gone — which is
+  // why it asks, counts what it is about to take, and says so when an account
+  // is attached to this person.
+  function deleteFromCompany() {
+    setCrew((prev) => prev.filter((m) => m.id !== member.id));
+    setConfirmingDelete(false);
   }
 
   function save() {
@@ -210,6 +219,30 @@ export function RosterRow({ member, show, shows, setCrew, DEPARTMENTS, DEPARTMEN
               <UserMinus size={13} strokeWidth={1.75} />
             </button>
           )
+        )}
+        {confirmingDelete ? (
+          <>
+            <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, textAlign: 'right' }}>
+              DELETE FROM COMPANY?{(member.assignments || []).length ? ` ON ${(member.assignments || []).length} SHOW${(member.assignments || []).length === 1 ? '' : 'S'}` : ''}
+              {member.userId ? ' — an account is linked to them' : ''}
+            </span>
+            <button onClick={deleteFromCompany} className="td-focusable" style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '3px 9px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
+              Delete
+            </button>
+            <button onClick={() => setConfirmingDelete(false)} className="td-focusable" style={{ background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 9px', fontSize: 10.5, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => { setConfirmingDelete(true); setConfirmingRemove(false); }}
+            className="td-focusable"
+            title={`Remove ${member.name} from the company roster entirely — every production, not just this one.`}
+            aria-label={`Remove ${member.name} from the company`}
+            style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+          >
+            <Trash2 size={13} strokeWidth={1.75} />
+          </button>
         )}
         {!show || assignment ? (
           <button onClick={startEdit} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label={`Edit ${member.name}`}>
