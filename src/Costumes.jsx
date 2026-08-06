@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { costumesSpec } from './importSpecs.jsx';
 import { COSTUME_SOURCES, COSTUME_SOURCE_ORDER, assignmentFor, sceneLabel } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -290,6 +292,16 @@ export function CostumesModule({ show, actors, inventory, locations, setShows, c
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename={`${show.title}-costumes`}
+          columns={costumesSpec.columns}
+          sample={costumesSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => costumesSpec.build(r, { show: show }));
+            setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, costumes: [...(s.costumes || []), ...items] } : s)));
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-costumes`}
           rows={() =>

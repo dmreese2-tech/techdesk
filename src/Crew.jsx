@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Mail, Pencil, Phone, Plus, Settings, Trash2, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { crewSpec } from './importSpecs.jsx';
 import { assignmentFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -576,6 +578,16 @@ export function CrewModule({ show, shows, crew, setCrew, currentUserId, setCurre
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename="crew"
+          columns={crewSpec.columns}
+          sample={crewSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => crewSpec.build(r, { show, departments: DEPARTMENTS }));
+            setCrew((prev) => [...prev, ...items]);
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show ? show.title : 'company'}-crew`}
           rows={() =>

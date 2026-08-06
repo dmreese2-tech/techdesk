@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Check, ChevronDown, ChevronUp, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { cuesSpec } from './importSpecs.jsx';
 import { cueCode, isDuplicateCue, nextCueNumber } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -275,6 +277,16 @@ export function RunOfShowModule({ show, cueSheets, setCueSheets, CUE_DEPTS }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename={`${show.title}-run-of-show`}
+          columns={cuesSpec.columns}
+          sample={cuesSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => cuesSpec.build(r, { cueDepts: CUE_DEPTS }));
+            setCueSheets((prev) => ({ ...prev, [show.id]: [...(prev[show.id] || []), ...items] }));
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-run-of-show`}
           rows={() =>

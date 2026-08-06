@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Briefcase, Music, Pencil, Plus, Star, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { scheduleSpec } from './importSpecs.jsx';
 import { MILESTONE_PRESETS, TODAY, addMinutesToTime, assignmentFor, formatDuration, formatShortDate, formatTime12h } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -334,6 +336,16 @@ export function ScheduleModule({ show, rosters, onScheduleChange }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename={`${show.title}-schedule`}
+          columns={scheduleSpec.columns}
+          sample={scheduleSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => scheduleSpec.build(r, { show }));
+            onScheduleChange(show.id, [...schedule, ...items]);
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-schedule`}
           rows={() =>

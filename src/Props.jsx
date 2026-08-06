@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { propsSpec } from './importSpecs.jsx';
 import { PROP_SOURCES, PROP_SOURCE_ORDER, allScenes, assignmentFor, sceneLabel } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -322,6 +324,16 @@ export function PropsModule({ show, actors, inventory, locations, setShows, char
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename={`${show.title}-props`}
+          columns={propsSpec.columns}
+          sample={propsSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => propsSpec.build(r, { show: show }));
+            setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, props: [...(s.props || []), ...items] } : s)));
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-props`}
           rows={() =>

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Footprints, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { scenesSpec } from './importSpecs.jsx';
 import { SCENE_TYPES, SCENE_TYPE_ORDER, assignmentFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -299,6 +301,16 @@ export function ScenesModule({ show, actors, setShows }) {
         This is the canonical scene list — Choreography, Costumes, and Props all reference scenes from here instead of typing a scene name each time.
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+        <ImportCsvButton
+          filename={`${show.title}-scenes`}
+          columns={scenesSpec.columns}
+          sample={scenesSpec.sample}
+          onImport={(rows) => {
+            const { acts, added } = scenesSpec.buildInto(rows, show.acts || []);
+            setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, acts } : s)));
+            return added;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-scenes`}
           rows={() =>

@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Mail, MailWarning, Mic, Pencil, Phone, Plus, Settings, Trash2, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { actorsSpec, musiciansSpec, staffSpec } from './importSpecs.jsx';
 import { assignmentFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -741,7 +743,7 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
 // ---------------------------------------------------------------------------
 // SHARED MODULE SHELL for Actors / Staff / Musicians
 // ---------------------------------------------------------------------------
-export function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurrentUserId, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions }) {
+export function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurrentUserId, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions, importSpec }) {
   const [showForm, setShowForm] = useState(false);
 
   function handleManualAdd({ name, phone, email, roleTitle, category, ...audioFields }) {
@@ -765,6 +767,18 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        {importSpec && (
+          <ImportCsvButton
+            filename={importSpec.filename}
+            columns={importSpec.columns}
+            sample={importSpec.sample}
+            onImport={(rows) => {
+              const items = rows.map((r) => importSpec.build(r, { show, castTypes: categoryMap, musicSections: categoryMap, staffAreas: categoryMap }));
+              setPeople((prev) => [...prev, ...items]);
+              return items.length;
+            }}
+          />
+        )}
         <ExportCsvButton
           filename={`${show ? show.title : 'company'}-${personLabel}`}
           rows={() =>
@@ -871,6 +885,7 @@ export function ActorsModule({ show, shows, actors, setActors, currentUserId, se
       categoryMap={CAST_TYPES}
       categoryOrder={CAST_TYPE_ORDER}
       audioOptions="mic"
+      importSpec={actorsSpec}
     />
   );
 }
@@ -889,6 +904,7 @@ export function StaffModule({ show, shows, staff, setStaff, currentUserId, setCu
       roleOptions={positions && positions.length ? positions : undefined}
       categoryMap={STAFF_AREAS}
       categoryOrder={STAFF_AREA_ORDER}
+      importSpec={staffSpec}
     />
   );
 }
@@ -911,6 +927,7 @@ export function MusiciansModule({ show, shows, musicians, setMusicians, currentU
       categoryMap={MUSIC_SECTIONS}
       categoryOrder={MUSIC_SECTION_ORDER}
       audioOptions="electric"
+      importSpec={musiciansSpec}
     />
   );
 }

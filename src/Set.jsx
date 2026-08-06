@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { setSpec } from './importSpecs.jsx';
 import { BUILD_STATUSES, BUILD_STATUS_ORDER } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
@@ -337,6 +339,16 @@ export function SetModule({ show, inventory, setInventory, locations, setShows, 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename={`${show.title}-set`}
+          columns={setSpec.columns}
+          sample={setSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => setSpec.build(r, { show: show }));
+            setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, setPieces: [...(s.setPieces || []), ...items] } : s)));
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-set`}
           rows={() =>

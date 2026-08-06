@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { charactersSpec } from './importSpecs.jsx';
 
 // ---------------------------------------------------------------------------
 // CHARACTERS — its own section, not a lodger inside Scenes. A character list
@@ -151,6 +153,16 @@ export function CharactersPanel({ show, setShows }) {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename={`${show.title}-characters`}
+          columns={charactersSpec.columns}
+          sample={charactersSpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => charactersSpec.build(r, { show: show }));
+            setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, characters: [...(s.characters || []), ...items] } : s)));
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename={`${show.title}-characters`}
           rows={() =>

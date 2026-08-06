@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, DollarSign, Maximize2, Pencil, Plus, Wrench, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
+import { ImportCsvButton } from './csvImport.jsx';
+import { inventorySpec } from './importSpecs.jsx';
 import { AudioSectionHeader } from './Audio.jsx';
 import { TODAY_STR, UNIT_STATUS_META, conditionForItem, formatShortDate, itemCheckedOut, itemConflicts, itemOutOfService } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
@@ -589,6 +591,16 @@ export function InventoryModule({ show, shows, calls, inventory, setInventory, l
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <ImportCsvButton
+          filename="inventory"
+          columns={inventorySpec.columns}
+          sample={inventorySpec.sample}
+          onImport={(rows) => {
+            const items = rows.map((r) => inventorySpec.build(r, { inventoryCategories: INVENTORY_CATEGORIES }));
+            setInventory((prev) => [...prev, ...items]);
+            return items.length;
+          }}
+        />
         <ExportCsvButton
           filename="inventory"
           rows={() =>
