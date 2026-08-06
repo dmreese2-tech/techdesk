@@ -43,6 +43,20 @@ export const SCRIPT_TYPES = [
 
 export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canEdit = true }) {
   const versions = show.scriptVersions || [];
+
+  // One PDF per production, many markups over it.
+  //
+  // Versions started out each carrying their own upload, which meant a second
+  // cued script meant uploading the same pages twice. Now the base holds the
+  // file and every other version is a layer of markers pointing back at it —
+  // `sourceId` is the whole difference between the two.
+  //
+  // Rows written before this have no sourceId and their own file, so they are
+  // their own base. That is what fileFor falls back to, and why nothing had to
+  // be migrated.
+  const base = versions.find((v) => v.isBase) || versions.find((v) => !v.sourceId) || null;
+  const fileFor = (v) => (v && v.sourceId) || (v && v.id);
+  const markups = versions.filter((v) => v !== base);
   const [activeId, setActiveId] = useState(null);
   // Fall back to the first version rather than nothing, so opening the section
   // shows a script instead of an empty frame with a picker above it.
@@ -81,7 +95,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
     }
     (async () => {
       try {
-        const bytes = await downloadScriptPdf(orgId, show.id, script.id);
+        const bytes = await downloadScriptPdf(orgId, show.id, fileFor(script));
         const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
         if (!cancelled) {
           setPdfDoc(doc);
@@ -136,27 +150,47 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
       const bytes = new Uint8Array(arrayBuffer);
       const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
       const pageCount = doc.numPages;
-      const id = `sv-${Date.now()}`;
+      // Replacing keeps the base's id so every markup layered on it still
+      // points somewhere. New pages under old markers is the uploader's
+      // problem to check, not something to solve by orphaning their work.
+      const id = base ? base.id : `sv-${Date.now()}`;
       await uploadScriptPdf(orgId, show.id, id, file);
-      const preset = SCRIPT_TYPES.find((t) => t.key === newType);
-      const version = {
+      const baseVersion = {
         id,
-        type: newType,
-        label: (newLabel.trim() || (preset ? preset.label : 'Script')),
+        isBase: true,
+        type: 'original',
+        label: 'Base script',
         fileName: file.name,
         pageCount,
-        markers: [],
+        markers: base ? base.markers || [] : [],
         // Uploading is not publishing. A half-marked blocking draft should not
         // land on forty phones the moment it is saved.
-        published: false,
+        published: base ? !!base.published : false,
         uploadedAt: new Date().toISOString(),
       };
       setShows((prev) =>
-        prev.map((s) => (s.id === show.id ? { ...s, scriptVersions: [...(s.scriptVersions || []), version] } : s))
+        prev.map((s) =>
+          s.id === show.id
+            ? {
+                ...s,
+                scriptVersions: base
+                  ? (s.scriptVersions || []).map((v) => (v.id === id ? { ...v, ...baseVersion } : v))
+                  : [...(s.scriptVersions || []), baseVersion],
+              }
+            : s
+        )
       );
       setActiveId(id);
-      setAdding(false);
-      setNewLabel('');
+      // Page counts follow the file, so every layer over it moves too.
+      if (base) {
+        setShows((prev) =>
+          prev.map((s) =>
+            s.id === show.id
+              ? { ...s, scriptVersions: (s.scriptVersions || []).map((v) => (v.sourceId === id ? { ...v, pageCount } : v)) }
+              : s
+          )
+        );
+      }
     } catch (err) {
       // Say what actually went wrong. The generic version of this line is what
       // hid a CDN version mismatch for as long as it did.
@@ -167,16 +201,51 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
     }
   }
 
+  // A markup is a name and an empty set of markers. The pages come from the
+  // base, which is the entire point of the change.
+  function addMarkup() {
+    if (!base) return;
+    const preset = SCRIPT_TYPES.find((t) => t.key === newType);
+    const version = {
+      id: `sv-${Date.now()}`,
+      sourceId: base.id,
+      type: newType,
+      label: newLabel.trim() || (preset ? preset.label : 'Markup'),
+      fileName: base.fileName,
+      pageCount: base.pageCount,
+      markers: [],
+      published: false,
+      uploadedAt: new Date().toISOString(),
+    };
+    setShows((prev) =>
+      prev.map((s) => (s.id === show.id ? { ...s, scriptVersions: [...(s.scriptVersions || []), version] } : s))
+    );
+    setActiveId(version.id);
+    setAdding(false);
+    setNewLabel('');
+  }
+
   function replaceScript() {
     if (!script) return;
-    deleteScriptPdf(orgId, show.id, script.id).catch(() => {});
+    const isBase = script === base;
+    // Deleting the base takes every markup with it — they are pages of a file
+    // that no longer exists. Only the base owns a PDF, so only the base has one
+    // to remove from storage.
+    if (isBase) deleteScriptPdf(orgId, show.id, script.id).catch(() => {});
     setShows((prev) =>
       prev.map((s) =>
-        s.id === show.id ? { ...s, scriptVersions: (s.scriptVersions || []).filter((v) => v.id !== script.id) } : s
+        s.id === show.id
+          ? {
+              ...s,
+              scriptVersions: (s.scriptVersions || []).filter(
+                (v) => v.id !== script.id && (!isBase || v.sourceId !== script.id)
+              ),
+            }
+          : s
       )
     );
     setActiveId(null);
-    setPlacingCueId(null);
+    setPlacing(null);
   }
 
   // Every write goes through here so a version edit only ever replaces that
@@ -249,7 +318,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
     if (!script) return;
     setExporting(true);
     try {
-      const bytes = await downloadScriptPdf(orgId, show.id, script.id);
+      const bytes = await downloadScriptPdf(orgId, show.id, fileFor(script));
       const outDoc = await PDFDocument.load(bytes);
       const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
       const pages = outDoc.getPages();
@@ -346,6 +415,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
                 whiteSpace: 'nowrap',
               }}
             >
+              {v === base && <FileText size={11} />}
               {typeLabel(v)}
               {v.published ? (
                 <Eye size={11} />
@@ -369,7 +439,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
       {versions.length > 0 && (
         <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>
           {canEdit
-            ? 'Cast see published versions only — the eye tells you which. Everything else is yours alone until you publish it.'
+            ? `One PDF, marked up as many ways as you need.${base ? ` Every version here reads ${base.fileName || 'the base script'}; only the markers differ.` : ''} Cast see published versions only — the eye tells you which.`
             : 'These are the versions published for this production. You can read and download them.'}
         </div>
       )}
@@ -490,6 +560,20 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            {canEdit && script === base && (
+              <>
+                <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleUpload} style={{ display: 'none' }} />
+                <button
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled={uploading}
+                  className="td-focusable"
+                  title="Swap the PDF everything is marked up over. Markers stay where they are, so check they still line up."
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: `1px solid ${COLOR.line}`, color: COLOR.textMuted, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}
+                >
+                  <Upload size={12} /> {uploading ? 'Reading…' : 'Replace PDF'}
+                </button>
+              </>
+            )}
             {canEdit && (
               <button
                 onClick={() => patchVersion(script.id, { published: !script.published })}
@@ -501,8 +585,15 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
               </button>
             )}
             {canEdit && (
-            <button onClick={replaceScript} className="td-focusable" title="Delete this version" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: `1px solid ${COLOR.line}`, color: COLOR.textFaint, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}>
-              <Trash2 size={12} /> Delete version
+            <button
+              onClick={replaceScript}
+              className="td-focusable"
+              title={script === base
+                ? `Delete the base PDF${markups.length ? ` and the ${markups.length} markup${markups.length === 1 ? '' : 's'} over it` : ''}.`
+                : 'Delete this markup. The base PDF stays.'}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: `1px solid ${COLOR.line}`, color: COLOR.textFaint, borderRadius: 3, padding: '7px 12px', fontSize: 11.5, cursor: 'pointer' }}
+            >
+              <Trash2 size={12} /> {script === base ? `Delete base${markups.length ? ` + ${markups.length}` : ''}` : 'Delete markup'}
             </button>
             )}
             <button
