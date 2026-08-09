@@ -20,6 +20,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const [members, setMembers] = useState(null);
   const [claims, setClaims] = useState([]);
   const [unclaimed, setUnclaimed] = useState([]);
+  const [canManage, setCanManage] = useState(false);
   const [me, setMe] = useState(null);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -39,6 +40,10 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
     setClaims(claimData || []);
     const { data: freeData } = await supabase.rpc('org_unclaimed_people', { check_org_id: orgId });
     setUnclaimed(freeData || []);
+    // Directors and producers manage the roster without being admins, so
+    // linking is gated on this and tier changes are not.
+    const { data: manage } = await supabase.rpc('can_manage_roster', { check_org_id: orgId });
+    setCanManage(!!manage);
   };
 
   useEffect(() => {
@@ -131,7 +136,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
 
       {/* Claims waiting on an admin. Approving one is what actually attaches an
           account to a person on the roster, so it sits above the list. */}
-      {iAmAdmin && claims.length > 0 && (
+      {canManage && claims.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.amber, letterSpacing: '0.08em', marginBottom: 6 }}>
             {claims.length} IDENTITY {claims.length === 1 ? 'CLAIM' : 'CLAIMS'} WAITING
@@ -205,7 +210,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                 ) : (
                   <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{TIER_META[tier]?.label.toUpperCase() || tier.toUpperCase()}</span>
                 )}
-                {iAmAdmin && !m.person_id && (
+                {canManage && !m.person_id && (
                   <select
                     className="td-focusable"
                     value=""
@@ -220,7 +225,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                     ))}
                   </select>
                 )}
-                {iAmAdmin && m.person_id && (
+                {canManage && m.person_id && (
                   <button
                     className="td-focusable"
                     disabled={busyId === m.user_id}

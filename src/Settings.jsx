@@ -315,7 +315,7 @@ export function SettingsModule({
   MUSIC_SECTIONS, setMUSIC_SECTIONS, MUSIC_SECTION_ORDER, setMUSIC_SECTION_ORDER,
   INVENTORY_CATEGORIES, setINVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER, setINVENTORY_CATEGORY_ORDER,
   CUE_DEPTS, setCUE_DEPTS, CUE_DEPT_ORDER, setCUE_DEPT_ORDER,
-  lastSavedAt, persistenceError, orgId, onSignOut,
+  lastSavedAt, persistenceError, orgId, onSignOut, isAdmin,
 }) {
   const [newVenue, setNewVenue] = useState('');
   const [newLocation, setNewLocation] = useState('');
@@ -374,6 +374,12 @@ export function SettingsModule({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32, maxWidth: 640 }}>
+      {isAdmin === false && (
+        <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderLeft: `3px solid ${COLOR.blueprint}`, borderRadius: 4, padding: '10px 14px' }}>
+          You can link accounts to the roster below. The company's vocabulary — venues, categories, positions and what each one may edit — is admin-only, so the rest of this page is read-only for you.
+        </div>
+      )}
+      <div style={isAdmin === false ? { pointerEvents: 'none', opacity: 0.6, display: 'flex', flexDirection: 'column', gap: 32 } : { display: 'contents' }}>
       {/* Company Logo */}
       <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} sectionTitle={sectionTitle} sectionNote={sectionNote} />
 
@@ -753,6 +759,8 @@ export function SettingsModule({
           sectionTitle={sectionTitle}
           sectionNote={sectionNote}
         />
+
+      </div>
 
         <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
 

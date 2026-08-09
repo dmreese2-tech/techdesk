@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ReferenceImages } from './ReferenceImages.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { propsSpec } from './importSpecs.jsx';
@@ -212,7 +213,7 @@ export function PropForm({ show, showActors, inventory, locations, characters, i
 // ---------------------------------------------------------------------------
 // PROP CARD
 // ---------------------------------------------------------------------------
-export function PropCard({ prop, show, showActors, inventory, onEdit, onRemove }) {
+export function PropCard({ prop, show, showActors, inventory, onEdit, onRemove, orgId, onImages }) {
   const sourceMeta = PROP_SOURCES[prop.source] || PROP_SOURCES.buy;
   const SourceIcon = sourceMeta.icon;
   const linkedItem = prop.inventoryItemId ? inventory.find((i) => i.id === prop.inventoryItemId) : null;
@@ -264,6 +265,15 @@ export function PropCard({ prop, show, showActors, inventory, onEdit, onRemove }
       )}
 
       {prop.notes && <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginTop: 6, lineHeight: 1.4 }}>{prop.notes}</div>}
+      <ReferenceImages
+        orgId={orgId}
+        showId={show.id}
+        module="props"
+        images={prop.referenceImages}
+        onChange={onImages}
+        canEdit={!!onImages}
+        compact
+      />
     </div>
   );
 }
@@ -271,7 +281,7 @@ export function PropCard({ prop, show, showActors, inventory, onEdit, onRemove }
 // PROPS MODULE — grouped by scene, since most props belong to a moment in
 // the show more than to a single actor.
 // ---------------------------------------------------------------------------
-export function PropsModule({ show, actors, inventory, locations, setShows, characters }) {
+export function PropsModule({ show, actors, inventory, locations, setShows, characters, orgId }) {
   const [filter, setFilter] = useState('all');
   const [consumableOnly, setConsumableOnly] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -448,6 +458,8 @@ export function PropsModule({ show, actors, inventory, locations, setShows, char
                       inventory={inventory}
                       onEdit={() => { setEditingId(p.id); setAdding(false); }}
                       onRemove={() => removeProp(p.id)}
+                      orgId={orgId}
+                      onImages={(imgs) => saveProp({ ...p, referenceImages: imgs })}
                     />
                   )
                 )}

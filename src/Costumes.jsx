@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ReferenceImages } from './ReferenceImages.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { costumesSpec } from './importSpecs.jsx';
@@ -14,7 +15,7 @@ import { StubPanel } from './ui.jsx';
 // COSTUME FORM
 // ---------------------------------------------------------------------------
 export function CostumeForm({ show, showActors, inventory, locations, characters, initial, onSave, onCancel }) {
-  const [actorId, setActorId] = useState(initial?.actorId || showActors[0]?.id || '');
+  const [actorId, setActorId] = useState(initial?.actorId || '');
   const [characterId, setCharacterId] = useState(initial?.characterId || '');
   const [sceneId, setSceneId] = useState(initial?.sceneId || '');
   const [description, setDescription] = useState(initial?.description || '');
@@ -44,10 +45,10 @@ export function CostumeForm({ show, showActors, inventory, locations, characters
   }
 
   function handleSave() {
-    if (!description.trim() || !actorId) return;
+    if (!description.trim()) return;
     onSave({
       id: initial?.id || `co${Date.now()}`,
-      actorId,
+      actorId: actorId || null,
       characterId: characterId || null,
       sceneId: sceneId || null,
       description: description.trim(),
@@ -97,8 +98,9 @@ export function CostumeForm({ show, showActors, inventory, locations, characters
           </select>
         </div>
         <div>
-          <label className="td-mono" style={labelStyle}>CASTED ROLE</label>
+          <label className="td-mono" style={labelStyle}>WORN BY (OPTIONAL)</label>
           <select className="td-focusable" style={inputStyle} value={actorId} onChange={(e) => setActorId(e.target.value)}>
+            <option value="">{showActors.length ? 'Nobody cast yet' : 'No cast on this show yet'}</option>
             {showActors.map((a) => (
               <option key={a.id} value={a.id}>{a.name} — {a.roleTitle}</option>
             ))}
@@ -177,18 +179,18 @@ export function CostumeForm({ show, showActors, inventory, locations, characters
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button
           onClick={handleSave}
-          disabled={!description.trim() || !actorId}
+          disabled={!description.trim()}
           className="td-focusable"
           style={{
-            background: description.trim() && actorId ? COLOR.amber : COLOR.slateDim,
-            color: description.trim() && actorId ? COLOR.void : COLOR.textFaint,
+            background: description.trim() ? COLOR.amber : COLOR.slateDim,
+            color: description.trim() ? COLOR.void : COLOR.textFaint,
             border: 'none',
             borderRadius: 3,
             padding: '9px 16px',
             fontSize: 12,
             fontWeight: 600,
             letterSpacing: '0.03em',
-            cursor: description.trim() && actorId ? 'pointer' : 'not-allowed',
+            cursor: description.trim() ? 'pointer' : 'not-allowed',
           }}
         >
           {initial ? 'Save changes' : 'Add costume need'}
@@ -203,7 +205,7 @@ export function CostumeForm({ show, showActors, inventory, locations, characters
 // ---------------------------------------------------------------------------
 // COSTUME CARD
 // ---------------------------------------------------------------------------
-export function CostumeCard({ costume, show, inventory, onEdit, onRemove }) {
+export function CostumeCard({ costume, show, inventory, onEdit, onRemove, orgId, onImages }) {
   const sourceMeta = COSTUME_SOURCES[costume.source] || COSTUME_SOURCES.buy;
   const SourceIcon = sourceMeta.icon;
   const linkedItem = costume.inventoryItemId ? inventory.find((i) => i.id === costume.inventoryItemId) : null;
@@ -247,13 +249,22 @@ export function CostumeCard({ costume, show, inventory, onEdit, onRemove }) {
       )}
 
       {costume.notes && <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginTop: 6, lineHeight: 1.4 }}>{costume.notes}</div>}
+      <ReferenceImages
+        orgId={orgId}
+        showId={show.id}
+        module="costumes"
+        images={costume.referenceImages}
+        onChange={onImages}
+        canEdit={!!onImages}
+        compact
+      />
     </div>
   );
 }
 // ---------------------------------------------------------------------------
 // COSTUMES MODULE
 // ---------------------------------------------------------------------------
-export function CostumesModule({ show, actors, inventory, locations, setShows, characters }) {
+export function CostumesModule({ show, actors, inventory, locations, setShows, characters, orgId }) {
   const [filter, setFilter] = useState('all');
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -265,14 +276,53 @@ export function CostumesModule({ show, actors, inventory, locations, setShows, c
 
   const filtered = filter === 'all' ? costumes : filter === 'acquired' ? costumes.filter((c) => c.acquired) : costumes.filter((c) => !c.acquired);
 
+  // Costumes hang off the character, and casting is what fills that character
+  // later — often much later. Grouping by actor meant a costume for a role
+  // nobody had been cast in yet simply wasn't on the page, which is exactly
+  // the period when the costume designer is doing the most work.
+  //
+  // So: group by character first, fall back to actor for anything built before
+  // characters existed, and keep a bucket for costumes attached to neither.
+  const groupKeyFor = (c) => c.characterId || c.actorId || '__unassigned';
+
   const grouped = useMemo(() => {
     const g = {};
     filtered.forEach((c) => {
-      if (!g[c.actorId]) g[c.actorId] = [];
-      g[c.actorId].push(c);
+      const k = groupKeyFor(c);
+      if (!g[k]) g[k] = [];
+      g[k].push(c);
     });
     return g;
   }, [filtered]);
+
+  // Every group that has costumes, in a sensible order: characters as the show
+  // lists them, then anything older or unattached.
+  const groups = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+
+    (characters || []).forEach((ch) => {
+      if (!grouped[ch.id]) return;
+      seen.add(ch.id);
+      // Casting is recorded by character name on the actor's assignment, so
+      // that is what says whether this role has somebody in it.
+      const cast = showActors.find((a) => String(a.roleTitle || '').trim().toLowerCase() === String(ch.name || '').trim().toLowerCase());
+      out.push({ key: ch.id, title: ch.name, cast, costumes: grouped[ch.id] });
+    });
+
+    showActors.forEach((a) => {
+      if (!grouped[a.id] || seen.has(a.id)) return;
+      seen.add(a.id);
+      out.push({ key: a.id, title: a.roleTitle || a.name, cast: a, costumes: grouped[a.id] });
+    });
+
+    Object.keys(grouped).forEach((k) => {
+      if (seen.has(k)) return;
+      out.push({ key: k, title: k === '__unassigned' ? 'Not attached to a role' : 'Unknown role', cast: null, costumes: grouped[k], orphan: true });
+    });
+
+    return out;
+  }, [grouped, characters, showActors]);
 
   function addCostume(c) {
     setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, costumes: [...(s.costumes || []), c] } : s)));
@@ -372,15 +422,28 @@ export function CostumesModule({ show, actors, inventory, locations, setShows, c
 
       {adding && <CostumeForm show={show} showActors={showActors} inventory={inventory} locations={locations} characters={characters} onSave={addCostume} onCancel={() => setAdding(false)} />}
 
-      {Object.keys(grouped).length > 0 ? (
+      {groups.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-          {showActors.filter((a) => grouped[a.id] && grouped[a.id].length > 0).map((a) => (
-            <div key={a.id}>
-              <div className="td-display" style={{ fontSize: 14, color: COLOR.textMuted, letterSpacing: '0.03em', marginBottom: 8 }}>
-                {a.name} <span className="td-mono" style={{ fontSize: 11, color: COLOR.textFaint, letterSpacing: 0, textTransform: 'none' }}>— {a.roleTitle}</span>
+          {groups.map((g) => (
+            <div key={g.key}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 8, flexWrap: 'wrap' }}>
+                <span className="td-display" style={{ fontSize: 14, color: COLOR.textMuted, letterSpacing: '0.03em' }}>{g.title}</span>
+                {g.cast ? (
+                  <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint }}>{g.cast.name}</span>
+                ) : (
+                  // The work is real whether or not the part is filled; this
+                  // says which without hiding anything.
+                  <span
+                    className="td-mono"
+                    title={g.orphan ? 'These costumes are not attached to a character yet — edit one to attach it.' : 'Nobody is cast in this role yet. The costumes still count.'}
+                    style={{ fontSize: 9.5, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 20, padding: '2px 8px', letterSpacing: '0.06em' }}
+                  >
+                    {g.orphan ? 'NO ROLE' : 'NOT CAST'}
+                  </span>
+                )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
-                {grouped[a.id].map((c) =>
+                {g.costumes.map((c) =>
                   editingId === c.id ? (
                     <div key={c.id} style={{ gridColumn: '1 / -1' }}>
                       <CostumeForm show={show} showActors={showActors} inventory={inventory} locations={locations} characters={characters} initial={c} onSave={saveCostume} onCancel={() => setEditingId(null)} />
@@ -393,6 +456,8 @@ export function CostumesModule({ show, actors, inventory, locations, setShows, c
                       inventory={inventory}
                       onEdit={() => { setEditingId(c.id); setAdding(false); }}
                       onRemove={() => removeCostume(c.id)}
+                      orgId={orgId}
+                      onImages={(imgs) => saveCostume({ ...c, referenceImages: imgs })}
                     />
                   )
                 )}

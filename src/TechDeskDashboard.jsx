@@ -413,6 +413,8 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // What this person may write, resolved by the database rather than
   // recomputed here — see docs/permissions.md. Null until it has been asked.
   const [canWrite, setCanWrite] = useState(null);
+  // Directors and producers manage the roster without being admins.
+  const [canManageRoster, setCanManageRoster] = useState(false);
   // The roster entry this account is linked to, if any. Undefined until asked,
   // null if the account isn't linked to anybody.
   const [me, setMe] = useState(undefined);
@@ -509,6 +511,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             .maybeSingle()
             .then(({ data: person }) => setMe(person || null));
         });
+        supabase.rpc('can_manage_roster', { check_org_id: orgId }).then(({ data }) => setCanManageRoster(!!data));
         loadMyPermissions(orgId)
           .then(setCanWrite)
           .catch(() => {
@@ -612,7 +615,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // the one that actually refuses, and this only spares people the surprise.
   const sectionModule = SECTION_MODULE[active] || null;
   const sectionWritable = (() => {
-    if (active === 'settings') return isAdmin !== false;
+    if (active === 'settings') return isAdmin !== false || canManageRoster;
     if (!sectionModule) return true;
     if (canWrite === null) return true;
     if (active === 'inventory') return canWrite.inventoryCategories.size > 0;
@@ -1097,13 +1100,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ))}
         {active === 'costumes' &&
           (currentShow ? (
-            <CostumesModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} characters={currentShow?.characters || []} />
+            <CostumesModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} characters={currentShow?.characters || []} orgId={orgId} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="costume needs" />
           ))}
         {active === 'props' &&
           (currentShow ? (
-            <PropsModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} characters={currentShow?.characters || []} />
+            <PropsModule show={currentShow} actors={actors} inventory={inventory} locations={locations} setShows={setShows} characters={currentShow?.characters || []} orgId={orgId} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="prop needs" />
           ))}
@@ -1138,7 +1141,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         {active === 'inventory' && <InventoryModule show={currentShow} shows={shows} calls={calls} inventory={inventory} setInventory={setInventory} locations={locations} INVENTORY_CATEGORIES={inventoryCategories} INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder} />}
         {active === 'set' &&
           (currentShow ? (
-            <SetModule show={currentShow} inventory={inventory} setInventory={setInventory} locations={locations} setShows={setShows} INVENTORY_CATEGORIES={inventoryCategories} INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder} />
+            <SetModule show={currentShow} inventory={inventory} setInventory={setInventory} locations={locations} setShows={setShows} INVENTORY_CATEGORIES={inventoryCategories} INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder} orgId={orgId} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="build list" />
           ))}
@@ -1191,6 +1194,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             persistenceError={persistenceError}
             orgId={orgId}
             onSignOut={onSignOut}
+            isAdmin={isAdmin}
             positions={positions}
             setPositions={setPositions}
             orgLogo={orgLogo}

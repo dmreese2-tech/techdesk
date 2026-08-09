@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
+import { ReferenceImages } from './ReferenceImages.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { setSpec } from './importSpecs.jsx';
@@ -238,7 +239,7 @@ export function SetPieceForm({ show, inventory, setInventory, locations, initial
 // ---------------------------------------------------------------------------
 // SET PIECE CARD
 // ---------------------------------------------------------------------------
-export function SetPieceCard({ piece, inventory, onEdit, onRemove, onStatusChange }) {
+export function SetPieceCard({ piece, inventory, onEdit, onRemove, onStatusChange, orgId, show, onImages }) {
   const statusMeta = BUILD_STATUSES[piece.buildStatus] || BUILD_STATUSES.not_started;
 
   return (
@@ -303,13 +304,22 @@ export function SetPieceCard({ piece, inventory, onEdit, onRemove, onStatusChang
       )}
 
       {piece.notes && <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginTop: 10, lineHeight: 1.5 }}>{piece.notes}</div>}
+      <ReferenceImages
+        orgId={orgId}
+        showId={show.id}
+        module="set"
+        images={piece.referenceImages}
+        onChange={onImages}
+        canEdit={!!onImages}
+        compact
+      />
     </div>
   );
 }
 // ---------------------------------------------------------------------------
 // SET MODULE
 // ---------------------------------------------------------------------------
-export function SetModule({ show, inventory, setInventory, locations, setShows, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
+export function SetModule({ show, inventory, setInventory, locations, setShows, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER, orgId }) {
   const [filter, setFilter] = useState('all');
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -421,6 +431,9 @@ export function SetModule({ show, inventory, setInventory, locations, setShows, 
                 inventory={inventory}
                 onEdit={() => { setEditingId(piece.id); setAdding(false); }}
                 onRemove={() => removePiece(piece.id)}
+                orgId={orgId}
+                show={show}
+                onImages={(imgs) => savePiece({ ...piece, referenceImages: imgs })}
                 onStatusChange={(status) => changeStatus(piece.id, status)}
               />
             )
