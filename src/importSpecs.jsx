@@ -81,7 +81,9 @@ export const charactersSpec = {
 
 // --- People: Crew, Actors, Musicians, Staff ---------------------------------
 // The four rosters differ only in what the role column is called and which
-// taxonomy the category belongs to, so they share one builder.
+// taxonomy the category belongs to, so they share one builder. Three of the
+// four now point at the same taxonomy — departments — which is the whole point
+// of the merge.
 function peopleSpec({ filename, roleLabel, roleField, categoryLabel, categoryMap, sample }) {
   return {
     filename,
@@ -92,6 +94,7 @@ function peopleSpec({ filename, roleLabel, roleField, categoryLabel, categoryMap
       const catName = r.get(categoryLabel);
       const catKey = Object.keys(categoryMap(ctx) || {}).find(
         (k) => String((categoryMap(ctx)[k] || {}).label || '').toLowerCase() === catName.toLowerCase()
+          || k.toLowerCase() === catName.toLowerCase()
       );
       const person = {
         id: uid('p'),
@@ -127,16 +130,20 @@ export const actorsSpec = peopleSpec({
   sample: { Name: 'Jordan Blake', Character: 'Prospero', 'Cast type': 'Lead', Phone: '555-0101', Email: 'jordan@example.com' },
 });
 
+// Band and staff file under a department now, same as crew. The old Section and
+// Area columns named lists that no longer exist; Department is the one word all
+// three rosters use, and a sheet exported before the merge still imports
+// because an unmatched name falls back rather than failing.
 export const musiciansSpec = peopleSpec({
   filename: 'musicians', roleLabel: 'Instrument', roleField: 'roleTitle',
-  categoryLabel: 'Section', categoryMap: (ctx) => ctx.musicSections,
-  sample: { Name: 'Alex Chen', Instrument: 'Reed 1', Section: 'Winds/Brass', Phone: '555-0102', Email: 'alex@example.com' },
+  categoryLabel: 'Department', categoryMap: (ctx) => ctx.departments,
+  sample: { Name: 'Alex Chen', Instrument: 'Reed 1', Department: 'Band', Phone: '555-0102', Email: 'alex@example.com' },
 });
 
 export const staffSpec = peopleSpec({
   filename: 'staff', roleLabel: 'Position', roleField: 'roleTitle',
-  categoryLabel: 'Area', categoryMap: (ctx) => ctx.staffAreas,
-  sample: { Name: 'Robin Hale', Position: 'Stage Manager', Area: 'Directing', Phone: '555-0103', Email: 'robin@example.com' },
+  categoryLabel: 'Department', categoryMap: (ctx) => ctx.departments,
+  sample: { Name: 'Robin Hale', Position: 'Stage Manager', Department: 'Directing', Phone: '555-0103', Email: 'robin@example.com' },
 });
 
 // --- Costumes ---------------------------------------------------------------
@@ -210,10 +217,13 @@ export const inventorySpec = {
   filename: 'inventory',
   columns: [C('Name', true), C('Category'), C('Asset no'), C('Quantity'), C('Location'), C('Cost per unit'), C('Purchase date'), C('Source'), C('Notes')],
   sample: { Name: 'ETC Source Four 26°', Category: 'Electrics', 'Asset no': 'LX-0142', Quantity: '24', Location: 'Electrics Cage', 'Cost per unit': '495', 'Purchase date': '2026-01-15', Source: 'BMI Supply', Notes: 'Rep plot' },
+  // Category is a department that keeps stock. Matched on the label as typed,
+  // and on the key too, so a sheet exported from this app re-imports cleanly.
   build: (r, ctx) => {
     const catName = r.get('Category');
     const catKey = Object.keys(ctx.inventoryCategories || {}).find(
       (k) => String((ctx.inventoryCategories[k] || {}).label || '').toLowerCase() === catName.toLowerCase()
+        || k.toLowerCase() === catName.toLowerCase()
     );
     const qty = num(r.get('Quantity'), 1);
     return {
@@ -239,10 +249,14 @@ export const cuesSpec = {
   filename: 'run-of-show',
   columns: [C('Department', true), C('Number', true), C('Description', true)],
   sample: { Department: 'LX', Number: '1', Description: 'House to half' },
+  // `cueDepts` here is the departments that call cues, whose label IS the cue
+  // prefix — so "LX" matches, and so does "electrics".
   build: (r, ctx) => {
     const deptName = r.get('Department');
     const deptKey = Object.keys(ctx.cueDepts || {}).find(
-      (k) => String((ctx.cueDepts[k] || {}).label || '').toLowerCase() === deptName.toLowerCase() || k.toLowerCase() === deptName.toLowerCase()
+      (k) => String((ctx.cueDepts[k] || {}).label || '').toLowerCase() === deptName.toLowerCase()
+        || String((ctx.cueDepts[k] || {}).name || '').toLowerCase() === deptName.toLowerCase()
+        || k.toLowerCase() === deptName.toLowerCase()
     );
     return {
       id: uid('q'),

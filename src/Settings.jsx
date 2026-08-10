@@ -1,20 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Boxes, Briefcase, Check, ClipboardList, Copy, Image as ImageIcon, Layers, MapPin, Music, Pencil, Plus, RotateCcw, Star, Upload, Users, X } from 'lucide-react';
+import { Box, Check, Image as ImageIcon, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
 import { PositionsPanel } from './Positions.jsx';
 import { PositionPermissionsPanel } from './PositionPermissions.jsx';
+import { stockDepartments } from './shared.jsx';
 
-// SETTINGS — venues, storage locations, positions and every
-// category taxonomy that feeds the pickers elsewhere.
+// SETTINGS — venues, storage locations, positions, and the two taxonomies that
+// feed the pickers elsewhere: departments and cast types.
 
 // ---------------------------------------------------------------------------
 // SETTINGS MODULE
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// TAXONOMY EDITOR — a single editable category list (department, cast type,
-// staff area, instrument section, inventory category, cue department).
+// TAXONOMY EDITOR — a single editable category list. Departments have their own
+// editor below, with the extra fields they carry; this one is for cast types.
 // Existing entries keep their original icon; new entries get a shared
 // fallback icon since there's no icon picker here.
 // ---------------------------------------------------------------------------
@@ -166,6 +167,216 @@ export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defa
   );
 }
 // ---------------------------------------------------------------------------
+// DEPARTMENTS EDITOR — the one list that replaced four.
+//
+// Crew rosters, staff areas, inventory categories and cue departments were four
+// editors describing the same departments, and keeping them in step was a
+// clerical job nobody signed up for. This is the single list, with the two
+// things that used to be implied by *which* list you were in now stated
+// explicitly on the department itself:
+//
+//   CUE    — the prefix its cues carry. Blank means it doesn't call cues, and
+//            it stays out of every cue picker. This is what used to be
+//            "is it in the cue departments list".
+//   STOCK  — whether it keeps inventory. This is what used to be "is it in the
+//            inventory categories list".
+//
+// The colour is the department's, not the cue's — it was only ever on cue
+// departments because they were the only ones that drew anything, and a
+// department that starts calling cues next season shouldn't need one picked in
+// a hurry.
+// ---------------------------------------------------------------------------
+export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon }) {
+  const [newLabel, setNewLabel] = useState('');
+  const [editingKey, setEditingKey] = useState(null);
+  const [labelDraft, setLabelDraft] = useState('');
+
+  const inputStyle = {
+    background: COLOR.void,
+    border: `1px solid ${COLOR.line}`,
+    borderRadius: 3,
+    padding: '5px 8px',
+    color: COLOR.textPrimary,
+    fontSize: 12,
+  };
+
+  function slugify(label) {
+    const base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'department';
+    let key = base;
+    let n = 1;
+    while (map[key]) key = `${base}_${++n}`;
+    return key;
+  }
+  function addEntry() {
+    if (!newLabel.trim()) return;
+    const key = slugify(newLabel);
+    // New departments start calling nothing and keeping nothing. Both are one
+    // click away, and both are answers only the company can give.
+    setMap((prev) => ({ ...prev, [key]: { label: newLabel.trim(), icon: defaultIcon, color: '#9AA5B1', stock: false } }));
+    setOrder((prev) => [...prev, key]);
+    setNewLabel('');
+  }
+  function patch(key, fields) {
+    setMap((prev) => ({ ...prev, [key]: { ...prev[key], ...fields } }));
+  }
+  function saveLabel(key) {
+    const label = labelDraft.trim();
+    if (!label) return;
+    patch(key, { label });
+    setEditingKey(null);
+  }
+  function setCue(key, raw) {
+    const cue = raw.trim().toUpperCase();
+    setMap((prev) => {
+      const next = { ...prev[key] };
+      // Deleted rather than blanked: `cue` present is what makes a department
+      // call cues, so an empty string would leave it in the picker under a
+      // nameless prefix.
+      if (cue) next.cue = cue;
+      else delete next.cue;
+      return { ...prev, [key]: next };
+    });
+  }
+  function removeEntry(key) {
+    setMap((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setOrder((prev) => prev.filter((k) => k !== key));
+  }
+
+  const visible = order.filter((key) => map[key]);
+  const headerCell = { fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em' };
+  const GRID = '14px 1fr 62px 58px 22px';
+
+  return (
+    <div style={{ border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '12px 14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <span />
+        <span className="td-mono" style={headerCell}>DEPARTMENT</span>
+        <span className="td-mono" style={headerCell} title="The prefix this department's cues carry. Blank if it doesn't call cues.">CUE</span>
+        <span className="td-mono" style={headerCell} title="Whether this department keeps stock in the inventory.">STOCK</span>
+        <span />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 12 }}>
+        {visible.map((key) => {
+          const entry = map[key];
+          const Icon = entry.icon || defaultIcon;
+          return (
+            <div key={key} style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, alignItems: 'center' }}>
+              {/* The swatch is the control. A native colour input is ugly but it
+                  is also the one every OS already knows how to drive, and this
+                  is a setting people touch once a season. */}
+              <label
+                title={`Colour for ${entry.label} on the script`}
+                style={{ position: 'relative', width: 14, height: 14, borderRadius: 3, cursor: 'pointer', background: entry.color || COLOR.slateDim, border: `1px solid ${COLOR.line}` }}
+              >
+                <input
+                  type="color"
+                  value={entry.color || '#9AA5B1'}
+                  onChange={(e) => patch(key, { color: e.target.value })}
+                  style={{ opacity: 0, position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                />
+              </label>
+
+              {editingKey === key ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    className="td-focusable"
+                    autoFocus
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && saveLabel(key)}
+                    style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+                  />
+                  <button onClick={() => saveLabel(key)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.amber, cursor: 'pointer', display: 'flex' }} aria-label="Save">
+                    <Check size={13} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setEditingKey(key); setLabelDraft(entry.label); }}
+                  className="td-focusable"
+                  title={`Rename ${entry.label}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}
+                >
+                  <Icon size={12.5} color={COLOR.textMuted} strokeWidth={1.75} />
+                  <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.label}</span>
+                  <Pencil size={10} color={COLOR.textFaint} />
+                </button>
+              )}
+
+              <input
+                className="td-focusable td-mono"
+                value={entry.cue || ''}
+                onChange={(e) => setCue(key, e.target.value)}
+                placeholder="—"
+                maxLength={6}
+                aria-label={`Cue prefix for ${entry.label}`}
+                title={entry.cue ? `Cues read "${entry.cue} 12"` : `${entry.label} doesn't call cues`}
+                style={{ ...inputStyle, width: '100%', textAlign: 'center', letterSpacing: '0.06em', color: entry.cue ? COLOR.textPrimary : COLOR.textFaint }}
+              />
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: COLOR.textFaint, cursor: 'pointer' }} title={`Does ${entry.label} keep stock?`}>
+                <input
+                  type="checkbox"
+                  checked={!!entry.stock}
+                  onChange={(e) => patch(key, { stock: e.target.checked })}
+                  aria-label={`${entry.label} keeps stock`}
+                />
+                {entry.stock ? 'Yes' : 'No'}
+              </label>
+
+              <button
+                onClick={() => removeEntry(key)}
+                className="td-focusable"
+                style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+                aria-label={`Remove ${entry.label}`}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+        {visible.length === 0 && (
+          <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>No departments yet.</div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          className="td-focusable"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addEntry()}
+          placeholder="Add a department..."
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <button
+          onClick={addEntry}
+          disabled={!newLabel.trim()}
+          className="td-focusable"
+          style={{
+            background: 'none',
+            border: `1px solid ${newLabel.trim() ? COLOR.amber : COLOR.line}`,
+            color: newLabel.trim() ? COLOR.amber : COLOR.textFaint,
+            borderRadius: 3,
+            padding: '5px 9px',
+            cursor: newLabel.trim() ? 'pointer' : 'not-allowed',
+            display: 'flex',
+          }}
+          aria-label="Add department"
+        >
+          <Plus size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // COMPANY LOGO
 //
 // Stored as a small data URL on org_settings, not in a storage bucket: it's one
@@ -311,10 +522,6 @@ export function SettingsModule({
   venues, setVenues, locations, setLocations,
   DEPARTMENTS, setDEPARTMENTS, DEPARTMENT_ORDER, setDEPARTMENT_ORDER,
   CAST_TYPES, setCAST_TYPES, CAST_TYPE_ORDER, setCAST_TYPE_ORDER,
-  STAFF_AREAS, setSTAFF_AREAS, STAFF_AREA_ORDER, setSTAFF_AREA_ORDER,
-  MUSIC_SECTIONS, setMUSIC_SECTIONS, MUSIC_SECTION_ORDER, setMUSIC_SECTION_ORDER,
-  INVENTORY_CATEGORIES, setINVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER, setINVENTORY_CATEGORY_ORDER,
-  CUE_DEPTS, setCUE_DEPTS, CUE_DEPT_ORDER, setCUE_DEPT_ORDER,
   orgId, onSignOut, isAdmin,
 }) {
   const [newVenue, setNewVenue] = useState('');
@@ -546,13 +753,11 @@ export function SettingsModule({
           <span className="td-display" style={sectionTitle}>Categories & taxonomies</span>
         </div>
         <div className="td-body" style={sectionNote}>
-          The vocabulary that threads through Crew, Cast, Band, Staff, Inventory, Set, and Run of Show. Rename or remove existing entries, or add new ones — everywhere these show up as a picker pulls from this list.
+          Departments are the company's spine — they thread through Crew, Staff, Band, Inventory, Set, Script and Run of Show. One department decides three things at once: who is on the roster, whether it calls cues, and whether it keeps stock. Cast types are their own list because a cast type isn't a department.
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-          <TaxonomyEditor
-            title="Crew rosters"
-            note="Departments crew members belong to, per show."
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 14 }}>
+          <DepartmentsEditor
             map={DEPARTMENTS}
             order={DEPARTMENT_ORDER}
             setMap={setDEPARTMENTS}
@@ -568,58 +773,28 @@ export function SettingsModule({
             setOrder={setCAST_TYPE_ORDER}
             defaultIcon={Star}
           />
-          <TaxonomyEditor
-            title="Staff areas"
-            note="Directing, back office, and other production staff."
-            map={STAFF_AREAS}
-            order={STAFF_AREA_ORDER}
-            setMap={setSTAFF_AREAS}
-            setOrder={setSTAFF_AREA_ORDER}
-            defaultIcon={Briefcase}
-          />
-          <TaxonomyEditor
-            title="Band sections"
-            note="Instrument parts — keys, strings, winds..."
-            map={MUSIC_SECTIONS}
-            order={MUSIC_SECTION_ORDER}
-            setMap={setMUSIC_SECTIONS}
-            setOrder={setMUSIC_SECTION_ORDER}
-            defaultIcon={Music}
-          />
-          <TaxonomyEditor
-            title="Inventory categories"
-            note="How gear is grouped in the stock room."
-            map={INVENTORY_CATEGORIES}
-            order={INVENTORY_CATEGORY_ORDER}
-            setMap={setINVENTORY_CATEGORIES}
-            setOrder={setINVENTORY_CATEGORY_ORDER}
-            defaultIcon={Boxes}
-          />
-          <TaxonomyEditor
-            title="Cue departments"
-            note="LX, sound, fly… the prefix on every cue number. The colour is what the cue looks like once it's dropped on the script — pick something that survives being printed."
-            map={CUE_DEPTS}
-            order={CUE_DEPT_ORDER}
-            setMap={setCUE_DEPTS}
-            setOrder={setCUE_DEPT_ORDER}
-            defaultIcon={ClipboardList}
-            colors
-          />
         </div>
       </div>
 
       {/* Members */}
-        {/* Positions */}
-        <PositionsPanel positions={positions} setPositions={setPositions} />
-
-        {/* What each position can edit */}
-        <PositionPermissionsPanel
-          orgId={orgId}
+        {/* Positions, and what each one may edit — the same subject twice, so
+            they sit together: a position is a job title, and a job title is
+            what grants access. */}
+        <PositionsPanel
           positions={positions}
-          inventoryCategories={INVENTORY_CATEGORIES}
-          sectionTitle={sectionTitle}
-          sectionNote={sectionNote}
-        />
+          setPositions={setPositions}
+          departments={DEPARTMENTS}
+          departmentOrder={DEPARTMENT_ORDER}
+        >
+          <PositionPermissionsPanel
+            orgId={orgId}
+            positions={positions}
+            inventoryCategories={stockDepartments(DEPARTMENTS)}
+            departments={DEPARTMENTS}
+            sectionTitle={sectionTitle}
+            sectionNote={sectionNote}
+          />
+        </PositionsPanel>
 
       </div>
 

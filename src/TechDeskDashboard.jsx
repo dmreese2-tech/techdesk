@@ -42,16 +42,19 @@ import { loadMyPermissions } from './permissions.js';
 // same reason as before: it doesn't block the main thread and has real
 // headroom if this ever needs to cache more locally (e.g. offline support).
 //
-// One complication shows up on both sides of this: six pieces of state
-// (departments, cast types, staff areas, band sections, inventory
-// categories, cue departments) store a lucide-react ICON COMPONENT as part
+// One complication shows up on both sides of this: the two taxonomies
+// (departments and cast types) store a lucide-react ICON COMPONENT as part
 // of each entry, and a React component reference can't be JSON-serialized
 // — it would silently vanish on save, whether to IndexedDB or Postgres. So
-// those six are serialized as label-only maps, and rehydrated by
-// re-attaching each entry's original icon (for the built-in categories) or
-// a taxonomy-appropriate fallback icon (for anything a user added later) —
-// the same fallback TaxonomyEditor already uses when creating a new entry,
-// so behavior doesn't change, only where the icon comes from.
+// both are serialized as label-only maps, and rehydrated by re-attaching
+// each entry's original icon (for the built-in categories) or a
+// taxonomy-appropriate fallback icon (for anything a user added later) —
+// the same fallback the taxonomy editors already use when creating a new
+// entry, so behavior doesn't change, only where the icon comes from.
+//
+// It used to be six. Staff areas, band sections, inventory categories and cue
+// departments were four other descriptions of the same departments; they are
+// derived from `departments` now and never stored separately.
 // ---------------------------------------------------------------------------
 const IDB_NAME = 'techdesk-db';
 const IDB_STORE = 'kv';
@@ -95,23 +98,38 @@ async function idbSet(key, value) {
 
 // Icon-bearing taxonomy <-> plain-JSON conversion.
 // Taxonomies are stored label-only because a lucide icon component is not
-// JSON. Cue departments now also carry a colour, so an entry is written as
-// { label, color } — and read back tolerating the bare string that older rows
-// still hold, since a taxonomy that throws on old data takes the app with it.
+// JSON. A department also carries a cue prefix, a colour and whether it keeps
+// stock, so an entry is written as { label, cue?, color?, stock? } — and read
+// back tolerating both the bare string and the { label, color } form that older
+// rows still hold, since a taxonomy that throws on old data takes the app with
+// it. Everything but `label` is optional in both directions.
 function serializeTaxonomy(map) {
   return Object.fromEntries(
-    Object.entries(map).map(([key, entry]) => [key, entry.color ? { label: entry.label, color: entry.color } : entry.label])
+    Object.entries(map).map(([key, entry]) => {
+      if (!entry) return [key, ''];
+      const extras = {};
+      if (entry.cue) extras.cue = entry.cue;
+      if (entry.color) extras.color = entry.color;
+      if (typeof entry.stock === 'boolean') extras.stock = entry.stock;
+      return [key, Object.keys(extras).length ? { label: entry.label, ...extras } : entry.label];
+    })
   );
 }
 function deserializeTaxonomy(initialMap, fallbackIcon, labelMap) {
   const result = {};
   Object.entries(labelMap || {}).forEach(([key, stored]) => {
-    const label = typeof stored === 'string' ? stored : stored?.label;
-    const color = typeof stored === 'string' ? undefined : stored?.color;
+    const bare = typeof stored === 'string';
+    const initial = initialMap[key] || {};
+    const label = bare ? stored : stored?.label;
+    const cue = bare ? initial.cue : stored?.cue ?? initial.cue;
+    const color = bare ? initial.color : stored?.color || initial.color;
+    const stock = bare ? initial.stock : stored?.stock ?? initial.stock;
     result[key] = {
       label,
-      icon: (initialMap[key] && initialMap[key].icon) || fallbackIcon,
-      ...(color || initialMap[key]?.color ? { color: color || initialMap[key].color } : {}),
+      icon: initial.icon || fallbackIcon,
+      ...(cue ? { cue } : {}),
+      ...(color ? { color } : {}),
+      ...(typeof stock === 'boolean' ? { stock } : {}),
     };
   });
   return result;
@@ -215,11 +233,7 @@ import {
   INITIAL_CAST_TYPES,
   INITIAL_CAST_TYPE_ORDER,
   seedActors,
-  INITIAL_STAFF_AREAS,
-  INITIAL_STAFF_AREA_ORDER,
   seedStaff,
-  INITIAL_MUSIC_SECTIONS,
-  INITIAL_MUSIC_SECTION_ORDER,
   seedMusicians,
   assignmentFor,
   PERSON_TYPES,
@@ -239,10 +253,11 @@ import {
   setterForType,
   defaultAssignmentFields,
   seedCalls,
-  INITIAL_INVENTORY_CATEGORIES,
-  INITIAL_INVENTORY_CATEGORY_ORDER,
   seedInventory,
-  INITIAL_CUE_DEPTS,
+  cueDepartments,
+  stockDepartments,
+  orderFor,
+  positionNames,
   cueCode,
   isDuplicateCue,
   nextCueNumber,
@@ -455,15 +470,21 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   const [departmentOrder, setDepartmentOrder] = useState(INITIAL_DEPARTMENT_ORDER);
   const [castTypes, setCastTypes] = useState(INITIAL_CAST_TYPES);
   const [castTypeOrder, setCastTypeOrder] = useState(INITIAL_CAST_TYPE_ORDER);
-  const [staffAreas, setStaffAreas] = useState(INITIAL_STAFF_AREAS);
-  const [staffAreaOrder, setStaffAreaOrder] = useState(INITIAL_STAFF_AREA_ORDER);
-  const [musicSections, setMusicSections] = useState(INITIAL_MUSIC_SECTIONS);
-  const [musicSectionOrder, setMusicSectionOrder] = useState(INITIAL_MUSIC_SECTION_ORDER);
-  const [inventoryCategories, setInventoryCategories] = useState(INITIAL_INVENTORY_CATEGORIES);
-  const [inventoryCategoryOrder, setInventoryCategoryOrder] = useState(INITIAL_INVENTORY_CATEGORY_ORDER);
-  const [cueDepts, setCueDepts] = useState(INITIAL_CUE_DEPTS);
-  const [cueDeptOrder, setCueDeptOrder] = useState(Object.keys(INITIAL_CUE_DEPTS));
   const [currentShowId, setCurrentShowId] = useState(null);
+
+  // The four lists that used to be their own state are views of `departments`
+  // now. Derived, not stored: there is one department list, and a module that
+  // wants the cue departments asks for the departments that call cues.
+  const cueDepts = useMemo(() => cueDepartments(departments, departmentOrder), [departments, departmentOrder]);
+  const inventoryCategories = useMemo(() => stockDepartments(departments, departmentOrder), [departments, departmentOrder]);
+  const inventoryCategoryOrder = useMemo(() => Object.keys(inventoryCategories), [inventoryCategories]);
+  // The pit is one department; the chairs inside it are positions. Musicians
+  // group under Band rather than under a section list of their own.
+  const bandDepartments = useMemo(
+    () => (departments.band ? { band: departments.band } : departments),
+    [departments]
+  );
+  const bandDepartmentOrder = useMemo(() => orderFor(bandDepartments, departmentOrder), [bandDepartments, departmentOrder]);
 
   const [hydrated, setHydrated] = useState(false);
   const [persistenceError, setPersistenceError] = useState(false);
@@ -520,18 +541,16 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             // a form that silently discards work.
             setCanWrite({ byShow: {}, inventoryCategories: new Set() });
         });
-        setDepartments(deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS)));
-        setDepartmentOrder(data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER);
-        setCastTypes(deserializeTaxonomy(INITIAL_CAST_TYPES, Star, Object.keys(data.settings.castTypes).length ? data.settings.castTypes : serializeTaxonomy(INITIAL_CAST_TYPES)));
-        setCastTypeOrder(data.settings.castTypeOrder.length ? data.settings.castTypeOrder : INITIAL_CAST_TYPE_ORDER);
-        setStaffAreas(deserializeTaxonomy(INITIAL_STAFF_AREAS, Briefcase, Object.keys(data.settings.staffAreas).length ? data.settings.staffAreas : serializeTaxonomy(INITIAL_STAFF_AREAS)));
-        setStaffAreaOrder(data.settings.staffAreaOrder.length ? data.settings.staffAreaOrder : INITIAL_STAFF_AREA_ORDER);
-        setMusicSections(deserializeTaxonomy(INITIAL_MUSIC_SECTIONS, Music, Object.keys(data.settings.musicSections).length ? data.settings.musicSections : serializeTaxonomy(INITIAL_MUSIC_SECTIONS)));
-        setMusicSectionOrder(data.settings.musicSectionOrder.length ? data.settings.musicSectionOrder : INITIAL_MUSIC_SECTION_ORDER);
-        setInventoryCategories(deserializeTaxonomy(INITIAL_INVENTORY_CATEGORIES, Boxes, Object.keys(data.settings.inventoryCategories).length ? data.settings.inventoryCategories : serializeTaxonomy(INITIAL_INVENTORY_CATEGORIES)));
-        setInventoryCategoryOrder(data.settings.inventoryCategoryOrder.length ? data.settings.inventoryCategoryOrder : INITIAL_INVENTORY_CATEGORY_ORDER);
-        setCueDepts(deserializeTaxonomy(INITIAL_CUE_DEPTS, ClipboardList, Object.keys(data.settings.cueDepts).length ? data.settings.cueDepts : serializeTaxonomy(INITIAL_CUE_DEPTS)));
-        setCueDeptOrder(data.settings.cueDeptOrder.length ? data.settings.cueDeptOrder : Object.keys(INITIAL_CUE_DEPTS));
+        // orderFor, not the stored order as-is: the merge added six departments
+        // to companies whose department_order still lists the original seven,
+        // and an order that doesn't mention a department would hide it from
+        // every roster and picker in the app.
+        const loadedDepartments = deserializeTaxonomy(INITIAL_DEPARTMENTS, Layers, Object.keys(data.settings.departments).length ? data.settings.departments : serializeTaxonomy(INITIAL_DEPARTMENTS));
+        setDepartments(loadedDepartments);
+        setDepartmentOrder(orderFor(loadedDepartments, data.settings.departmentOrder.length ? data.settings.departmentOrder : INITIAL_DEPARTMENT_ORDER));
+        const loadedCastTypes = deserializeTaxonomy(INITIAL_CAST_TYPES, Star, Object.keys(data.settings.castTypes).length ? data.settings.castTypes : serializeTaxonomy(INITIAL_CAST_TYPES));
+        setCastTypes(loadedCastTypes);
+        setCastTypeOrder(orderFor(loadedCastTypes, data.settings.castTypeOrder.length ? data.settings.castTypeOrder : INITIAL_CAST_TYPE_ORDER));
 
         const local = (await idbGet('deviceState')) || {};
         // Fall back to the first production rather than none. A new account on
@@ -662,10 +681,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           venues, locations, instruments, positions, logoUrl: orgLogo,
           departments: serializeTaxonomy(departments), departmentOrder,
           castTypes: serializeTaxonomy(castTypes), castTypeOrder,
-          staffAreas: serializeTaxonomy(staffAreas), staffAreaOrder,
-          musicSections: serializeTaxonomy(musicSections), musicSectionOrder,
-          inventoryCategories: serializeTaxonomy(inventoryCategories), inventoryCategoryOrder,
-          cueDepts: serializeTaxonomy(cueDepts), cueDeptOrder,
         },
         orgId
       )
@@ -675,8 +690,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     return () => clearTimeout(timeout);
   }, [
     hydrated, isAdmin, orgId, venues, locations, instruments, positions, orgLogo,
-    departments, departmentOrder, castTypes, castTypeOrder, staffAreas, staffAreaOrder,
-    musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
+    departments, departmentOrder, castTypes, castTypeOrder,
   ]);
 
 
@@ -1049,16 +1063,16 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ))}
 
         {active === 'crew' && (
-          <CrewModule show={currentShow} shows={shows} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={departments} DEPARTMENT_ORDER={departmentOrder} positions={positions.crew} />
+          <CrewModule show={currentShow} shows={shows} crew={crew} setCrew={setCrew} currentUserId={currentUserId} setCurrentUserId={setCurrentUserId} DEPARTMENTS={departments} DEPARTMENT_ORDER={departmentOrder} positions={positionNames(positions.crew)} />
         )}
         {active === 'actors' && (
           <ActorsModule show={currentShow} shows={shows} actors={actors} setActors={setActors} currentUserId={currentActorId} setCurrentUserId={setCurrentActorId} CAST_TYPES={castTypes} CAST_TYPE_ORDER={castTypeOrder} characters={currentShow?.characters || []} />
         )}
         {active === 'musicians' && (
-          <MusiciansModule show={currentShow} shows={shows} musicians={musicians} setMusicians={setMusicians} currentUserId={currentMusicianId} setCurrentUserId={setCurrentMusicianId} MUSIC_SECTIONS={musicSections} MUSIC_SECTION_ORDER={musicSectionOrder} positions={positions.musician} />
+          <MusiciansModule show={currentShow} shows={shows} musicians={musicians} setMusicians={setMusicians} currentUserId={currentMusicianId} setCurrentUserId={setCurrentMusicianId} MUSIC_SECTIONS={bandDepartments} MUSIC_SECTION_ORDER={bandDepartmentOrder} positions={positionNames(positions.musician)} />
         )}
         {active === 'staff' && (
-          <StaffModule show={currentShow} shows={shows} staff={staff} setStaff={setStaff} currentUserId={currentStaffId} setCurrentUserId={setCurrentStaffId} STAFF_AREAS={staffAreas} STAFF_AREA_ORDER={staffAreaOrder} positions={positions.staff} />
+          <StaffModule show={currentShow} shows={shows} staff={staff} setStaff={setStaff} currentUserId={currentStaffId} setCurrentUserId={setCurrentStaffId} STAFF_AREAS={departments} STAFF_AREA_ORDER={departmentOrder} positions={positionNames(positions.staff)} />
         )}
         {active === 'choreography' &&
           (currentShow ? (
@@ -1102,7 +1116,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ))}
         {active === 'audio' &&
           (currentShow ? (
-            <AudioModule show={currentShow} actors={actors} musicians={musicians} setShows={setShows} CAST_TYPE_ORDER={castTypeOrder} MUSIC_SECTIONS={musicSections} />
+            <AudioModule show={currentShow} actors={actors} musicians={musicians} setShows={setShows} CAST_TYPE_ORDER={castTypeOrder} MUSIC_SECTIONS={departments} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="audio profile" />
           ))}
@@ -1139,22 +1153,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             setCAST_TYPES={setCastTypes}
             CAST_TYPE_ORDER={castTypeOrder}
             setCAST_TYPE_ORDER={setCastTypeOrder}
-            STAFF_AREAS={staffAreas}
-            setSTAFF_AREAS={setStaffAreas}
-            STAFF_AREA_ORDER={staffAreaOrder}
-            setSTAFF_AREA_ORDER={setStaffAreaOrder}
-            MUSIC_SECTIONS={musicSections}
-            setMUSIC_SECTIONS={setMusicSections}
-            MUSIC_SECTION_ORDER={musicSectionOrder}
-            setMUSIC_SECTION_ORDER={setMusicSectionOrder}
-            INVENTORY_CATEGORIES={inventoryCategories}
-            setINVENTORY_CATEGORIES={setInventoryCategories}
-            INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder}
-            setINVENTORY_CATEGORY_ORDER={setInventoryCategoryOrder}
-            CUE_DEPTS={cueDepts}
-            setCUE_DEPTS={setCueDepts}
-            CUE_DEPT_ORDER={cueDeptOrder}
-            setCUE_DEPT_ORDER={setCueDeptOrder}
             orgId={orgId}
             onSignOut={onSignOut}
             isAdmin={isAdmin}

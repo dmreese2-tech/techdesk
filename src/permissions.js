@@ -49,17 +49,21 @@ export const POSITION_DEFAULTS = {
   'stage manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script'] },
   'assistant stage manager': { modules: ['calls', 'groups', 'runofshow'] },
 
-  'props master': { modules: ['props'], inventory: ['Props'] },
-  'props': { modules: ['props'], inventory: ['Props'] },
-  'costume designer': { modules: ['costumes'], inventory: ['Wardrobe'] },
-  'wardrobe': { modules: ['costumes'], inventory: ['Wardrobe'] },
-  'wardrobe run': { modules: ['costumes'], inventory: ['Wardrobe'] },
-  'master electrician': { modules: ['runofshow'], inventory: ['Electrics', 'Rigging'] },
-  'lighting designer': { modules: ['runofshow'], inventory: ['Electrics'] },
-  'sound engineer': { modules: ['audio', 'runofshow'], inventory: ['Sound'] },
-  'sound designer': { modules: ['audio', 'runofshow'], inventory: ['Sound'] },
-  'scenic designer': { modules: ['set'], inventory: ['Scenic'] },
-  'carpenter': { modules: ['set'], inventory: ['Scenic'] },
+  // `inventory` holds CATEGORY KEYS, not labels — the same keys the stock
+  // departments use. can_write_inventory() tests them with jsonb `?`, which is
+  // exact and case-sensitive, so the 'Props' this list used to hold matched
+  // nothing at all and "use the usual permissions" silently granted no stock.
+  'props master': { modules: ['props'], inventory: ['props'] },
+  'props': { modules: ['props'], inventory: ['props'] },
+  'costume designer': { modules: ['costumes'], inventory: ['wardrobe'] },
+  'wardrobe': { modules: ['costumes'], inventory: ['wardrobe'] },
+  'wardrobe run': { modules: ['costumes'], inventory: ['wardrobe'] },
+  'master electrician': { modules: ['runofshow'], inventory: ['electrics', 'rigging'] },
+  'lighting designer': { modules: ['runofshow'], inventory: ['electrics'] },
+  'sound engineer': { modules: ['audio', 'runofshow'], inventory: ['sound'] },
+  'sound designer': { modules: ['audio', 'runofshow'], inventory: ['sound'] },
+  'scenic designer': { modules: ['set'], inventory: ['scenic'] },
+  'carpenter': { modules: ['set'], inventory: ['scenic'] },
   'choreographer': { modules: ['choreography', 'scenes'] },
   'music director': { modules: ['musicians', 'scenes'] },
 };

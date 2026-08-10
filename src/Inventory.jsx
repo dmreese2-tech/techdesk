@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, DollarSign, Maximize2, Pencil, Plus, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Box, DollarSign, Maximize2, Pencil, Plus, Wrench, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
@@ -40,7 +40,11 @@ export function StockBar({ item }) {
 // it'd read printed on the DYMO label taped to the case.
 // ---------------------------------------------------------------------------
 export function ItemCard({ item, shows, calls, onOpen, INVENTORY_CATEGORIES }) {
-  const Icon = INVENTORY_CATEGORIES[item.category].icon;
+  // Categories are departments now, and a department can stop keeping stock or
+  // be removed outright. An item filed under one that's gone still has to draw
+  // — it is exactly the row somebody needs to find and re-file.
+  const category = INVENTORY_CATEGORIES[item.category] || { label: item.category || 'Uncategorised', icon: Box };
+  const Icon = category.icon || Box;
   const condition = conditionForItem(item);
   const conflicts = itemConflicts(item, shows);
   const hasConflict = conflicts.length > 0;
@@ -70,7 +74,7 @@ export function ItemCard({ item, shows, calls, onOpen, INVENTORY_CATEGORIES }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <Icon size={12.5} color={COLOR.textFaint} strokeWidth={1.75} />
             <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.05em' }}>
-              {INVENTORY_CATEGORIES[item.category].label.toUpperCase()}
+              {String(category.label).toUpperCase()}
             </span>
           </div>
           <Maximize2 size={12} color={COLOR.textFaint} strokeWidth={1.75} />
@@ -166,7 +170,8 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
   const available = item.totalQty - checkedOut - outOfService;
   const conflicts = itemConflicts(item, shows);
   const showCallsForNew = calls.filter((c) => c.showId === newShowId);
-  const Icon = INVENTORY_CATEGORIES[item.category].icon;
+  const category = INVENTORY_CATEGORIES[item.category] || { label: item.category || 'Uncategorised', icon: Box };
+  const Icon = category.icon || Box;
 
   function saveInfo() {
     setInventory((prev) =>
@@ -226,7 +231,7 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <Icon size={13} color={COLOR.textFaint} strokeWidth={1.75} />
             <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em' }}>
-              {INVENTORY_CATEGORIES[item.category].label.toUpperCase()}
+              {String(category.label).toUpperCase()}
             </span>
           </div>
         </div>
@@ -461,7 +466,7 @@ export function NewItemForm({ show, calls, locations, onAdd, onClose, INVENTORY_
           <label className="td-mono" style={labelStyle}>CATEGORY</label>
           <select className="td-focusable" style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
             {INVENTORY_CATEGORY_ORDER.map((c) => (
-              <option key={c} value={c}>{INVENTORY_CATEGORIES[c].label}</option>
+              <option key={c} value={c}>{INVENTORY_CATEGORIES[c]?.label || c}</option>
             ))}
           </select>
         </div>
@@ -581,7 +586,7 @@ export function InventoryModule({ show, shows, calls, inventory, setInventory, l
   const attentionCount = inventory.filter((i) => conditionForItem(i) === 'attention').length;
   const conflictCount = inventory.filter((i) => itemConflicts(i, shows).length > 0).length;
   const thisShowCount = show ? inventory.filter((i) => (i.assignments || []).some((a) => a.showId === show.id)).length : 0;
-  const categoryFilters = [{ id: 'all', label: 'All' }, ...INVENTORY_CATEGORY_ORDER.map((c) => ({ id: c, label: INVENTORY_CATEGORIES[c].label }))];
+  const categoryFilters = [{ id: 'all', label: 'All' }, ...INVENTORY_CATEGORY_ORDER.map((c) => ({ id: c, label: INVENTORY_CATEGORIES[c]?.label || c }))];
   const openItem = openItemId ? inventory.find((i) => i.id === openItemId) : null;
 
   if (openItem) {

@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
+import { positionList } from './shared.jsx';
 
 // ---------------------------------------------------------------------------
 // POSITIONS — company-level job titles for crew, band and staff, so the same
 // position reads the same way on every production instead of being retyped per
 // assignment. Lives in Settings, next to the other company vocabularies.
+//
+// Each position now names the department it belongs to. That is what makes
+// Reed 1 a Band chair and Deck Head a Stage management one without anybody
+// restating it on every show — and it is the field the band sections used to
+// be standing in for, before they were folded into positions under Band.
 // ---------------------------------------------------------------------------
 
 const COLOR = {
@@ -56,35 +62,50 @@ const POSITION_KINDS = [
   { key: 'staff', label: 'Staff positions', note: 'Production and front-of-house roles: Stage Manager, Producer, House Manager.', placeholder: 'e.g. Stage Manager' },
 ];
 
-export function PositionsPanel({ positions, setPositions }) {
+// The department a new position is assumed to be in, when the company has one
+// by that key. A band chair is in the Band; a staff role usually isn't in any
+// one department until somebody says so.
+const DEFAULT_DEPT_FOR_KIND = { musician: 'band' };
+
+export function PositionsPanel({ positions, setPositions, departments = {}, departmentOrder = [], children }) {
   const [drafts, setDrafts] = useState({ crew: '', musician: '', staff: '' });
 
-  const list = (key) => (positions && positions[key]) || [];
+  // Always the normalised shape, whatever is actually stored.
+  const list = (key) => positionList(positions && positions[key]);
+  const deptKeys = departmentOrder.filter((d) => departments[d]);
+
+  const write = (key, next) => setPositions({ ...positions, [key]: next });
 
   const add = (key) => {
     const trimmed = (drafts[key] || '').trim();
     if (!trimmed) return;
-    if (list(key).some((p) => p.toLowerCase() === trimmed.toLowerCase())) {
+    if (list(key).some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
       setDrafts((d) => ({ ...d, [key]: '' }));
       return;
     }
-    setPositions({ ...positions, [key]: [...list(key), trimmed] });
+    const dept = departments[DEFAULT_DEPT_FOR_KIND[key]] ? DEFAULT_DEPT_FOR_KIND[key] : '';
+    write(key, [...list(key), { name: trimmed, dept }]);
     setDrafts((d) => ({ ...d, [key]: '' }));
   };
 
-  const remove = (key, value) => {
-    setPositions({ ...positions, [key]: list(key).filter((p) => p !== value) });
+  const setDept = (key, name, dept) => {
+    write(key, list(key).map((p) => (p.name === name ? { ...p, dept } : p)));
+  };
+
+  const remove = (key, name) => {
+    write(key, list(key).filter((p) => p.name !== name));
   };
 
   return (
     <div>
       <div className="td-display" style={sectionTitle}>Positions</div>
       <div className="td-body" style={sectionNote}>
-        The job titles you pick from when putting someone on a show. Keeping them here means the same position reads the
-        same way on every production, which is what makes the callboard and the audio plot group correctly.
+        The job titles you pick from when putting someone on a show, and the department each one belongs to. Keeping them
+        here means the same position reads the same way on every production, which is what makes the callboard and the
+        audio plot group correctly.
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
         {POSITION_KINDS.map(({ key, label, note, placeholder }) => (
           <div key={key} style={{ background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: 14 }}>
             <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em' }}>
@@ -92,17 +113,40 @@ export function PositionsPanel({ positions, setPositions }) {
             </div>
             <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, margin: '4px 0 10px' }}>{note}</div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 10 }}>
               {list(key).length === 0 ? (
                 <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint }}>None yet.</div>
               ) : (
                 list(key).map((position) => (
-                  <div key={position} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textPrimary }}>{position}</span>
+                  <div key={position.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textPrimary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {position.name}
+                    </span>
+                    <select
+                      className="td-focusable"
+                      value={departments[position.dept] ? position.dept : ''}
+                      onChange={(e) => setDept(key, position.name, e.target.value)}
+                      aria-label={`Department for ${position.name}`}
+                      title={`Which department ${position.name} belongs to`}
+                      style={{
+                        background: COLOR.void,
+                        border: `1px solid ${COLOR.line}`,
+                        borderRadius: 3,
+                        color: position.dept && departments[position.dept] ? COLOR.textMuted : COLOR.textFaint,
+                        fontSize: 11.5,
+                        padding: '4px 6px',
+                        maxWidth: 132,
+                      }}
+                    >
+                      <option value="">No department</option>
+                      {deptKeys.map((d) => (
+                        <option key={d} value={d}>{departments[d].label}</option>
+                      ))}
+                    </select>
                     <button
                       className="td-focusable"
-                      onClick={() => remove(key, position)}
-                      aria-label={`Remove ${position}`}
+                      onClick={() => remove(key, position.name)}
+                      aria-label={`Remove ${position.name}`}
                       style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 13, cursor: 'pointer', padding: '0 4px' }}
                     >
                       ×
@@ -130,6 +174,10 @@ export function PositionsPanel({ positions, setPositions }) {
           </div>
         ))}
       </div>
+
+      {/* What each position can edit lives inside Positions, because it is the
+          same subject: the job title is what grants the access. */}
+      {children && <div style={{ marginTop: 26 }}>{children}</div>}
     </div>
   );
 }

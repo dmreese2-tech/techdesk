@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Mail, MailWarning, Mic, Pencil, Phone, Plus, Settings, Trash2, UserMinus, X } from 'lucide-react';
+import { AlertTriangle, Mail, MailWarning, Mic, Pencil, Phone, Plus, Settings, Trash2, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
@@ -212,7 +212,7 @@ export function PeopleSignIn({ personLabel, roleLabel, rolePlaceholder, roleOpti
               <label className="td-mono" style={labelStyle}>CATEGORY</label>
               <select className="td-focusable" style={{ ...inputStyle, width: '100%' }} value={category} onChange={(e) => setCategory(e.target.value)}>
                 {categoryOrder.map((c) => (
-                  <option key={c} value={c}>{categoryMap[c].label}</option>
+                  <option key={c} value={c}>{categoryMap[c]?.label || c}</option>
                 ))}
               </select>
             </div>
@@ -373,8 +373,14 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
                 <label className="td-mono" style={labelStyle}>CATEGORY</label>
                 <select className="td-focusable" style={inputStyle} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
                   {categoryOrder.map((c) => (
-                    <option key={c} value={c}>{categoryMap[c].label}</option>
+                    <option key={c} value={c}>{categoryMap[c]?.label || c}</option>
                   ))}
+                  {/* Their current department, if it isn't one any more. Without
+                      it the select shows blank and saving quietly re-files them
+                      under whatever happens to be first. */}
+                  {draft.category && !categoryOrder.includes(draft.category) && (
+                    <option value={draft.category}>{draft.category} (not a department)</option>
+                  )}
                 </select>
               </div>
             </>
@@ -579,18 +585,28 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
     return g;
   }, [onShow, show, categoryOrder]);
 
+  // Anyone filed under a department that isn't in the order — deleted, renamed,
+  // or written before the department merge — gets a group of their own at the
+  // end. Dropping them from the roster silently is how somebody misses a call.
+  const orphanKeys = useMemo(
+    () => Object.keys(grouped).filter((c) => !categoryOrder.includes(c) && grouped[c].length > 0),
+    [grouped, categoryOrder]
+  );
+  const groupKeys = [...categoryOrder.filter((c) => grouped[c] && grouped[c].length > 0), ...orphanKeys];
+
   return (
     <div>
       {show && onShow.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20, marginBottom: 26 }}>
-          {categoryOrder.filter((c) => grouped[c] && grouped[c].length > 0).map((c) => {
-            const Icon = categoryMap[c].icon;
+          {groupKeys.map((c) => {
+            const entry = categoryMap[c];
+            const Icon = entry?.icon || AlertTriangle;
             return (
               <div key={c}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
-                  <Icon size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-                  <span className="td-display" style={{ fontSize: 13, color: COLOR.textMuted, letterSpacing: '0.05em' }}>
-                    {categoryMap[c].label} — {grouped[c].length}
+                  <Icon size={14} color={entry ? COLOR.textMuted : COLOR.amber} strokeWidth={1.75} />
+                  <span className="td-display" style={{ fontSize: 13, color: entry ? COLOR.textMuted : COLOR.amber, letterSpacing: '0.05em' }} title={entry ? undefined : `${c} is not a department any more — re-file these people`}>
+                    {entry?.label || c} — {grouped[c].length}
                   </span>
                 </div>
                 <div>
@@ -682,7 +698,7 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
               <label className="td-mono" style={labelStyle}>CATEGORY</label>
               <select className="td-focusable" style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
                 {categoryOrder.map((c) => (
-                  <option key={c} value={c}>{categoryMap[c].label}</option>
+                  <option key={c} value={c}>{categoryMap[c]?.label || c}</option>
                 ))}
               </select>
             </div>
@@ -773,7 +789,7 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
             columns={importSpec.columns}
             sample={importSpec.sample}
             onImport={(rows) => {
-              const items = rows.map((r) => importSpec.build(r, { show, castTypes: categoryMap, musicSections: categoryMap, staffAreas: categoryMap }));
+              const items = rows.map((r) => importSpec.build(r, { show, castTypes: categoryMap, departments: categoryMap }));
               setPeople((prev) => [...prev, ...items]);
               return items.length;
             }}

@@ -7,6 +7,7 @@ import {
   loadPositionPermissions,
   savePositionPermission,
 } from './permissions.js';
+import { positionList } from './shared.jsx';
 
 // ---------------------------------------------------------------------------
 // POSITION PERMISSIONS
@@ -48,7 +49,12 @@ function Pill({ on, label, title, onClick }) {
   );
 }
 
-function PositionRow({ orgId, kind, position, value, inventoryCategories, onSaved, onError }) {
+// `stockCategories` is the TAXONOMY side — the departments that keep stock,
+// as [{ key, label }] — and is only ever read. `draft.inventoryCategories` is
+// the GRANT LIST: the category keys this position may write. They are two
+// different things that used to share a name, and conflating them is how you
+// hand somebody the wrong shelves.
+function PositionRow({ orgId, kind, position, deptLabel, value, stockCategories, onSaved, onError }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [busy, setBusy] = useState(false);
@@ -119,6 +125,11 @@ function PositionRow({ orgId, kind, position, value, inventoryCategories, onSave
       >
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span style={{ flex: 1 }}>{position}</span>
+        {deptLabel && (
+          <span className="td-mono" title="The department this position belongs to" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em' }}>
+            {deptLabel.toUpperCase()}
+          </span>
+        )}
         {draft.companyWide && (
           <span className="td-mono" title="Writes on every production, assigned or not" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: COLOR.blueprint, letterSpacing: '0.08em' }}>
             <Globe size={11} /> COMPANY-WIDE
@@ -163,13 +174,13 @@ function PositionRow({ orgId, kind, position, value, inventoryCategories, onSave
             keeps the Props shelves; that says nothing about the rest of the warehouse.
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-            {inventoryCategories.length === 0 ? (
+            {stockCategories.length === 0 ? (
               <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>
-                No inventory categories yet — add them under Categories &amp; Taxonomies above.
+                No department keeps stock yet — tick STOCK on one under Departments above.
               </span>
             ) : (
-              inventoryCategories.map((cat) => (
-                <Pill key={cat} on={draft.inventoryCategories.includes(cat)} label={cat} onClick={() => toggleCategory(cat)} />
+              stockCategories.map((cat) => (
+                <Pill key={cat.key} on={draft.inventoryCategories.includes(cat.key)} label={cat.label} onClick={() => toggleCategory(cat.key)} />
               ))
             )}
           </div>
@@ -188,7 +199,7 @@ function PositionRow({ orgId, kind, position, value, inventoryCategories, onSave
   );
 }
 
-export function PositionPermissionsPanel({ orgId, positions, inventoryCategories, sectionTitle, sectionNote }) {
+export function PositionPermissionsPanel({ orgId, positions, inventoryCategories, departments, sectionTitle, sectionNote }) {
   const [perms, setPerms] = useState(null);
   const [error, setError] = useState('');
 
@@ -213,8 +224,13 @@ export function PositionPermissionsPanel({ orgId, positions, inventoryCategories
     setPerms((prev) => ({ ...prev, [`${kind}:${position}`]: value }));
   };
 
-  const categories = useMemo(() => Object.keys(inventoryCategories || {}), [inventoryCategories]);
-  const anyPositions = ['crew', 'musician', 'staff'].some((k) => (positions?.[k] || []).length > 0);
+  // Keys are what the grant list stores and what can_write_inventory() compares
+  // against; the label is only ever shown.
+  const categories = useMemo(
+    () => Object.entries(inventoryCategories || {}).map(([key, entry]) => ({ key, label: entry?.label || key })),
+    [inventoryCategories]
+  );
+  const anyPositions = ['crew', 'musician', 'staff'].some((k) => positionList(positions?.[k]).length > 0);
 
   return (
     <div>
@@ -240,19 +256,20 @@ export function PositionPermissionsPanel({ orgId, positions, inventoryCategories
         <div className="td-body" style={sectionNote}>Loading…</div>
       ) : (
         ['staff', 'crew', 'musician'].map((kind) =>
-          (positions?.[kind] || []).length === 0 ? null : (
+          positionList(positions?.[kind]).length === 0 ? null : (
             <div key={kind} style={{ marginBottom: 16 }}>
               <div className="td-mono" style={{ fontSize: 10, color: COLOR.blueprint, letterSpacing: '0.08em', marginBottom: 7 }}>
                 {(KIND_LABELS[kind] || kind).toUpperCase()} POSITIONS
               </div>
-              {(positions[kind] || []).map((position) => (
+              {positionList(positions[kind]).map((position) => (
                 <PositionRow
-                  key={position}
+                  key={position.name}
                   orgId={orgId}
                   kind={kind}
-                  position={position}
-                  value={perms[`${kind}:${position}`] || { modules: [], inventoryCategories: [], companyWide: false }}
-                  inventoryCategories={categories}
+                  position={position.name}
+                  deptLabel={departments?.[position.dept]?.label || ''}
+                  value={perms[`${kind}:${position.name}`] || { modules: [], inventoryCategories: [], companyWide: false }}
+                  stockCategories={categories}
                   onSaved={onSaved}
                   onError={setError}
                 />

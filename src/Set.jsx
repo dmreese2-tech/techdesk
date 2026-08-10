@@ -144,7 +144,7 @@ export function SetPieceForm({ show, inventory, setInventory, locations, initial
                     <input className="td-focusable" style={inputStyle} value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} placeholder="e.g. Stair Unit, 3-step" />
                     <select className="td-focusable" style={inputStyle} value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}>
                       {INVENTORY_CATEGORY_ORDER.map((cat) => (
-                        <option key={cat} value={cat}>{INVENTORY_CATEGORIES[cat].label}</option>
+                        <option key={cat} value={cat}>{INVENTORY_CATEGORIES[cat]?.label || cat}</option>
                       ))}
                     </select>
                     <input className="td-focusable" type="number" min="1" style={inputStyle} value={newItem.totalQty} onChange={(e) => setNewItem({ ...newItem, totalQty: e.target.value })} />

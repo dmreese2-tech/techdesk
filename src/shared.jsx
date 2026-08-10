@@ -1,4 +1,4 @@
-import { Battery, Bell, Box, Boxes, Briefcase, ClipboardList, Copy, DollarSign, Footprints, Hammer, Link2, Megaphone, Mic, Music, Package, Repeat, Shirt, Star, Users, Volume2, Zap } from 'lucide-react';
+import { Battery, Bell, Box, Boxes, Briefcase, ClipboardList, Copy, DollarSign, Footprints, Hammer, Link2, Megaphone, Music, Package, Repeat, Shirt, Star, Users, Volume2, Zap } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 
 // ---------------------------------------------------------------------------
@@ -569,16 +569,116 @@ export function generateCallsForSchedule(show) {
     .filter(Boolean);
 }
 
+// ---------------------------------------------------------------------------
+// DEPARTMENTS — the one list that used to be four.
+//
+// Crew rosters, staff areas, inventory categories and cue departments were four
+// descriptions of the same real-world departments, and they drifted. This is
+// what they collapse into; see supabase/15-departments-pass1.sql for the
+// migration that built the same shape server-side.
+//
+// An entry is { label, icon, cue?, color, stock }:
+//   cue    — the prefix this department's cues carry (LX 12, SND 4). Absent
+//            means the department doesn't call cues and never appears in a cue
+//            picker.
+//   stock  — true if it keeps inventory. What used to be an inventory category
+//            is now a department with the flag set.
+//   color  — how its cues draw on a marked-up script, and how it reads in a
+//            dark booth. Every department carries one so a department that
+//            starts calling cues later doesn't need a colour picked in a panic.
+//
+// Keys are deliberately the ones the old four lists already shared, so cue
+// rows, inventory rows and crew assignments written before the merge still
+// resolve without being rewritten.
+// ---------------------------------------------------------------------------
 export const INITIAL_DEPARTMENTS = {
-  electrics: { label: 'Electrics', icon: Zap },
-  scenic: { label: 'Scenic', icon: Hammer },
-  sound: { label: 'Sound', icon: Volume2 },
-  props: { label: 'Props', icon: Package },
-  wardrobe: { label: 'Wardrobe', icon: Shirt },
-  sm: { label: 'Stage Mgmt', icon: ClipboardList },
-  general: { label: 'General Hands', icon: Users },
+  electrics: { label: 'Electrics', icon: Zap, cue: 'LX', color: '#E8A33D', stock: true },
+  sound: { label: 'Sound', icon: Volume2, cue: 'SND', color: '#4A9FD8', stock: true },
+  scenic: { label: 'Scenic', icon: Hammer, cue: 'SCENE', color: '#C77DBF', stock: true },
+  rigging: { label: 'Rigging', icon: Link2, cue: 'FLY', color: '#6FCF97', stock: true },
+  sm: { label: 'Stage management', icon: ClipboardList, cue: 'SM', color: '#E4695E', stock: false },
+  props: { label: 'Props', icon: Package, color: '#8B8FE8', stock: true },
+  wardrobe: { label: 'Wardrobe', icon: Shirt, color: '#5FBDB0', stock: true },
+  consumables: { label: 'Consumables', icon: Battery, color: '#D9A05B', stock: true },
+  general: { label: 'General hands', icon: Users, color: '#9AA5B1', stock: false },
+  band: { label: 'Band', icon: Music, color: '#C77DBF', stock: false },
+  directing: { label: 'Directing', icon: Megaphone, color: '#E8A33D', stock: false },
+  back_office: { label: 'Back office', icon: Briefcase, color: '#4A9FD8', stock: false },
+  // The layer over the departments rather than one of them: Producer, Technical
+  // Director, General Manager. They are company-wide in the permissions model,
+  // so forcing them into Back office would say something untrue about them.
+  leadership: { label: 'Production office', icon: Star, color: '#D97C6A', stock: false },
 };
-export const INITIAL_DEPARTMENT_ORDER = ['sm', 'electrics', 'scenic', 'sound', 'props', 'wardrobe', 'general'];
+export const INITIAL_DEPARTMENT_ORDER = [
+  'sm', 'electrics', 'sound', 'scenic', 'rigging', 'props', 'wardrobe',
+  'consumables', 'general', 'band', 'directing', 'back_office', 'leadership',
+];
+
+// ---------------------------------------------------------------------------
+// The four superseded lists, derived rather than stored.
+//
+// Every module that used to take its own taxonomy now takes one of these. They
+// are plain functions over `departments` so there is exactly one place a
+// department is described, and no second list to drift from it.
+// ---------------------------------------------------------------------------
+
+// Both take the department order and emit their keys in it, so a picker built
+// straight from Object.keys() still reads in the order the company chose.
+function subset(departments, order, keep, shape) {
+  const source = departments || {};
+  const wanted = Object.keys(source).filter((key) => source[key] && keep(source[key]));
+  const sorted = (order || []).filter((key) => wanted.includes(key));
+  const out = {};
+  [...sorted, ...wanted.filter((key) => !sorted.includes(key))].forEach((key) => {
+    out[key] = shape(source[key]);
+  });
+  return out;
+}
+
+// Departments that call cues, keyed as before, but presenting the CUE PREFIX as
+// `label` — cueCode() and every cue picker read `.label`, and on a cue sheet the
+// department reads "LX", not "Electrics". The department's own name is kept as
+// `name` for the places that need to say it in full.
+export function cueDepartments(departments, order) {
+  return subset(departments, order, (e) => !!e.cue, (e) => ({ ...e, label: e.cue, name: e.label }));
+}
+
+// Departments that keep stock — what "inventory category" used to mean. Keeps
+// the department's own label, because in the stock room it reads "Electrics".
+export function stockDepartments(departments, order) {
+  return subset(departments, order, (e) => !!e.stock, (e) => e);
+}
+
+// ---------------------------------------------------------------------------
+// POSITIONS — job titles, now with the department they sit in.
+//
+// A position used to be a bare string in org_settings.crew_positions and
+// friends. It is { name, dept } now, so the callboard can say which department
+// a chair belongs to without anyone retyping it per assignment. Every read goes
+// through these, because the stored value is a bare string for every company
+// that hasn't re-saved its settings since — and a position list that throws on
+// the old shape takes Settings, Crew, Band and Staff down with it.
+// ---------------------------------------------------------------------------
+export function positionEntry(position) {
+  if (typeof position === 'string') return { name: position, dept: '' };
+  return { name: position?.name || '', dept: position?.dept || '' };
+}
+export function positionList(list) {
+  return (list || []).map(positionEntry).filter((p) => p.name);
+}
+// Just the titles, for the pickers that only ever wanted a list of strings.
+export function positionNames(list) {
+  return positionList(list).map((p) => p.name);
+}
+
+// An order array filtered to the keys a derived map actually has, with anything
+// present in the map but missing from the order appended rather than dropped —
+// a department added by hand to the JSON still has to show up somewhere.
+export function orderFor(map, order) {
+  const known = (order || []).filter((key) => map[key]);
+  const extras = Object.keys(map).filter((key) => !known.includes(key));
+  return [...known, ...extras];
+}
 
 export const seedCrew = [
   { id: 'c1', name: 'Dana Fitch', phone: '555-0142', email: 'dana.fitch@venue.org', assignments: [
@@ -637,42 +737,34 @@ export const seedActors = [
   { id: 'a8', name: 'Morgan Diaz', assignments: [{ id: 'asn-a8-s2', showId: 's2', roleTitle: 'Ensemble', category: 'ensemble', miced: true, micType: 'Wireless Lav' }] },
 ];
 
-export const INITIAL_STAFF_AREAS = {
-  directing: { label: 'Directing', icon: Megaphone },
-  office: { label: 'Back Office', icon: Briefcase },
-  other: { label: 'Production Staff', icon: ClipboardList },
-};
-export const INITIAL_STAFF_AREA_ORDER = ['directing', 'office', 'other'];
-
+// Staff sit in departments now, same as crew — `people.kind` is what makes them
+// staff, not a separate area list. Producers and the TD land in Production
+// office, which is the layer over the departments rather than one of them.
 export const seedStaff = [
   { id: 'st1', name: 'R. Alvarez', assignments: [{ id: 'asn-st1-s1', showId: 's1', roleTitle: 'Director', category: 'directing' }] },
   { id: 'st2', name: 'Jamie Ellis', assignments: [{ id: 'asn-st2-s1', showId: 's1', roleTitle: 'Assistant Director', category: 'directing' }] },
   { id: 'st3', name: 'Taylor Grant', assignments: [
-    { id: 'asn-st3-s1', showId: 's1', roleTitle: 'Producer', category: 'office' },
-    { id: 'asn-st3-s2', showId: 's2', roleTitle: 'Producer', category: 'office' },
+    { id: 'asn-st3-s1', showId: 's1', roleTitle: 'Producer', category: 'leadership' },
+    { id: 'asn-st3-s2', showId: 's2', roleTitle: 'Producer', category: 'leadership' },
   ] },
-  { id: 'st4', name: 'Robin Cole', assignments: [{ id: 'asn-st4-s2', showId: 's2', roleTitle: 'House Manager', category: 'office' }] },
+  { id: 'st4', name: 'Robin Cole', assignments: [{ id: 'asn-st4-s2', showId: 's2', roleTitle: 'House Manager', category: 'back_office' }] },
   { id: 'st5', name: 'K. Osei', assignments: [{ id: 'asn-st5-s2', showId: 's2', roleTitle: 'Director', category: 'directing' }] },
-  { id: 'st6', name: 'Alex Kim', assignments: [{ id: 'asn-st6-s2', showId: 's2', roleTitle: 'Marketing & PR', category: 'other' }] },
+  { id: 'st6', name: 'Alex Kim', assignments: [{ id: 'asn-st6-s2', showId: 's2', roleTitle: 'Marketing & PR', category: 'back_office' }] },
 ];
 
-export const INITIAL_MUSIC_SECTIONS = {
-  md: { label: 'Music Director', icon: Music },
-  keys: { label: 'Keys', icon: Music },
-  strings: { label: 'Strings', icon: Music },
-  winds: { label: 'Winds/Brass', icon: Music },
-  percussion: { label: 'Percussion', icon: Music },
-  vocals: { label: 'Vocals', icon: Mic },
-};
-export const INITIAL_MUSIC_SECTION_ORDER = ['md', 'keys', 'strings', 'winds', 'percussion', 'vocals'];
+// Band sections are unfolded: the pit is one department, and Keys / Strings /
+// Reed 1 are POSITIONS within it (Settings → Positions → Band). A section was
+// never a department — it was a chair, and every musician already carried the
+// chair in their role title.
+export const INITIAL_BAND_POSITIONS = ['Music Director', 'Keys', 'Strings', 'Winds/Brass', 'Percussion', 'Vocals'];
 
 export const seedMusicians = [
-  { id: 'm1', name: 'Terry Wu', assignments: [{ id: 'asn-m1-s2', showId: 's2', roleTitle: 'Music Director / Conductor', category: 'md', electric: true, monitorMix: true }] },
-  { id: 'm2', name: 'Nina Osei', assignments: [{ id: 'asn-m2-s2', showId: 's2', roleTitle: 'Piano 1', category: 'keys', electric: true, monitorMix: true }] },
-  { id: 'm3', name: 'Chris Bell', assignments: [{ id: 'asn-m3-s2', showId: 's2', roleTitle: 'Violin', category: 'strings', electric: false, monitorMix: false }] },
-  { id: 'm4', name: 'Drew Fitch', assignments: [{ id: 'asn-m4-s2', showId: 's2', roleTitle: 'Reed 1', category: 'winds', electric: false, monitorMix: false }] },
-  { id: 'm5', name: 'Sam Okoye', assignments: [{ id: 'asn-m5-s2', showId: 's2', roleTitle: 'Drums/Percussion', category: 'percussion', electric: false, monitorMix: false }] },
-  { id: 'm6', name: 'Val Torres', assignments: [{ id: 'asn-m6-s2', showId: 's2', roleTitle: 'Vocal Captain', category: 'vocals', electric: false, monitorMix: false }] },
+  { id: 'm1', name: 'Terry Wu', assignments: [{ id: 'asn-m1-s2', showId: 's2', roleTitle: 'Music Director / Conductor', category: 'band', electric: true, monitorMix: true }] },
+  { id: 'm2', name: 'Nina Osei', assignments: [{ id: 'asn-m2-s2', showId: 's2', roleTitle: 'Piano 1', category: 'band', electric: true, monitorMix: true }] },
+  { id: 'm3', name: 'Chris Bell', assignments: [{ id: 'asn-m3-s2', showId: 's2', roleTitle: 'Violin', category: 'band', electric: false, monitorMix: false }] },
+  { id: 'm4', name: 'Drew Fitch', assignments: [{ id: 'asn-m4-s2', showId: 's2', roleTitle: 'Reed 1', category: 'band', electric: false, monitorMix: false }] },
+  { id: 'm5', name: 'Sam Okoye', assignments: [{ id: 'asn-m5-s2', showId: 's2', roleTitle: 'Drums/Percussion', category: 'band', electric: false, monitorMix: false }] },
+  { id: 'm6', name: 'Val Torres', assignments: [{ id: 'asn-m6-s2', showId: 's2', roleTitle: 'Vocal Captain', category: 'band', electric: false, monitorMix: false }] },
 ];
 
 // Look up a person's assignment (role/dept/instrument, per show) — the
@@ -832,16 +924,8 @@ export const generatedCalls = seedShows.flatMap((s) => generateCallsForSchedule(
 
 export const seedCalls = [...handwrittenCalls, ...generatedCalls];
 
-export const INITIAL_INVENTORY_CATEGORIES = {
-  electrics: { label: 'Electrics', icon: Zap },
-  rigging: { label: 'Rigging', icon: Link2 },
-  sound: { label: 'Sound', icon: Volume2 },
-  scenic: { label: 'Scenic', icon: Hammer },
-  props: { label: 'Props', icon: Package },
-  wardrobe: { label: 'Wardrobe', icon: Shirt },
-  consumables: { label: 'Consumables', icon: Battery },
-};
-export const INITIAL_INVENTORY_CATEGORY_ORDER = ['electrics', 'rigging', 'sound', 'scenic', 'props', 'wardrobe', 'consumables'];
+// Inventory categories were the same seven departments under another name.
+// They are now `stock: true` on the department itself — see stockDepartments().
 
 export const seedInventory = [
   { id: 'i1', assetNo: 'LX-0142', name: 'ETC Source Four 26° 750W', category: 'electrics', totalQty: 24, location: 'Electrics Cage',
@@ -941,21 +1025,16 @@ export const CUE_DEPT_PALETTE = [
   '#8B8FE8', '#5FBDB0', '#D9A05B', '#9AA5B1',
 ];
 
-export const INITIAL_CUE_DEPTS = {
-  electrics: { label: 'LX', icon: Zap, color: '#E8A33D' },
-  sound: { label: 'SND', icon: Volume2, color: '#4A9FD8' },
-  rigging: { label: 'FLY', icon: Link2, color: '#6FCF97' },
-  scenic: { label: 'SCENE', icon: Hammer, color: '#C77DBF' },
-  sm: { label: 'SM', icon: ClipboardList, color: '#E4695E' },
-};
+// Which departments call cues, and under what prefix, is now a field on the
+// department — see INITIAL_DEPARTMENTS and cueDepartments().
 
 // The colour to draw a cue in. Falls back down a chain rather than throwing:
 // a department added before colours existed, or a cue whose department was
 // deleted, still has to render.
-export function deptColor(deptKey, cueDepts) {
-  const entry = cueDepts && cueDepts[deptKey];
+export function deptColor(deptKey, departments) {
+  const entry = departments && departments[deptKey];
   if (entry && entry.color) return entry.color;
-  const keys = Object.keys(cueDepts || {});
+  const keys = Object.keys(departments || {});
   const i = keys.indexOf(deptKey);
   return CUE_DEPT_PALETTE[i >= 0 ? i % CUE_DEPT_PALETTE.length : 0];
 }

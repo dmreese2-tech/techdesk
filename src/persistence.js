@@ -166,7 +166,13 @@ function rowsToCueSheets(rows) {
   return byShow;
 }
 
-const DEFAULT_TAXONOMY_JSON = { departments: {}, departmentOrder: [], castTypes: {}, castTypeOrder: [], staffAreas: {}, staffAreaOrder: [], musicSections: {}, musicSectionOrder: [], inventoryCategories: {}, inventoryCategoryOrder: [], cueDepts: {}, cueDeptOrder: [] };
+// Two taxonomies, not six. Staff areas, band sections, inventory categories and
+// cue departments were four descriptions of the same departments; they are
+// fields on `departments` now (cue, stock) or positions under one of them
+// (band). The columns they used to live in are still on the table and are
+// deliberately neither read nor written here — dropping them is pass three,
+// and it is only safe once nothing on this side is looking at them.
+const DEFAULT_TAXONOMY_JSON = { departments: {}, departmentOrder: [], castTypes: {}, castTypeOrder: [] };
 
 function settingsRowToJs(row) {
   if (!row) return { venues: [], locations: [], instruments: [], logoUrl: '', positions: { crew: [], musician: [], staff: [] }, ...DEFAULT_TAXONOMY_JSON };
@@ -184,14 +190,6 @@ function settingsRowToJs(row) {
     departmentOrder: row.department_order || [],
     castTypes: row.cast_types || {},
     castTypeOrder: row.cast_type_order || [],
-    staffAreas: row.staff_areas || {},
-    staffAreaOrder: row.staff_area_order || [],
-    musicSections: row.music_sections || {},
-    musicSectionOrder: row.music_section_order || [],
-    inventoryCategories: row.inventory_categories || {},
-    inventoryCategoryOrder: row.inventory_category_order || [],
-    cueDepts: row.cue_depts || {},
-    cueDeptOrder: row.cue_dept_order || [],
   };
 }
 
@@ -358,14 +356,6 @@ export async function saveSettings(settings, orgId) {
     department_order: settings.departmentOrder,
     cast_types: settings.castTypes,
     cast_type_order: settings.castTypeOrder,
-    staff_areas: settings.staffAreas,
-    staff_area_order: settings.staffAreaOrder,
-    music_sections: settings.musicSections,
-    music_section_order: settings.musicSectionOrder,
-    inventory_categories: settings.inventoryCategories,
-    inventory_category_order: settings.inventoryCategoryOrder,
-    cue_depts: settings.cueDepts,
-    cue_dept_order: settings.cueDeptOrder,
   };
   const { error } = await supabase.from('org_settings').upsert(row);
   if (!error) return;

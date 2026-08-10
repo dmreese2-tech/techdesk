@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Pencil, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, ClipboardList, Pencil, Plus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
@@ -16,8 +16,11 @@ import { StubPanel } from './ui.jsx';
 export function CueRow({ cue, cues, isNext, onFire, onSave, onRemove, onMove, isFirst, isLast, CUE_DEPTS }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(cue);
-  const dept = CUE_DEPTS[cue.dept];
-  const Icon = dept.icon;
+  // A department can have its cue prefix cleared, or be deleted, while its cues
+  // are still on the sheet. Those cues are the ones that most need to be
+  // visible, so they render under their raw key rather than taking the page.
+  const dept = CUE_DEPTS[cue.dept] || { label: cue.dept, icon: ClipboardList };
+  const Icon = dept.icon || ClipboardList;
   const duplicate = editing && draft.num !== '' && isDuplicateCue(cues, draft.dept, draft.num, cue.id);
 
   const inputStyle = {
@@ -45,6 +48,7 @@ export function CueRow({ cue, cues, isNext, onFire, onSave, onRemove, onMove, is
               {Object.keys(CUE_DEPTS).map((d) => (
                 <option key={d} value={d}>{CUE_DEPTS[d].label}</option>
               ))}
+              {!CUE_DEPTS[draft.dept] && <option value={draft.dept}>{draft.dept}</option>}
             </select>
           </div>
           <div>
@@ -54,7 +58,7 @@ export function CueRow({ cue, cues, isNext, onFire, onSave, onRemove, onMove, is
         </div>
         {duplicate && (
           <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.amber, marginBottom: 8 }}>
-            {CUE_DEPTS[draft.dept]?.label} {draft.num} already exists on this cue sheet.
+            {CUE_DEPTS[draft.dept]?.label || draft.dept} {draft.num} already exists on this cue sheet.
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -204,7 +208,7 @@ export function NewCueForm({ cues, onAdd, onClose, CUE_DEPTS }) {
       </div>
       {duplicate && (
         <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.amber, marginTop: 8 }}>
-          {CUE_DEPTS[dept].label} {num} already exists on this cue sheet.
+          {CUE_DEPTS[dept]?.label || dept} {num} already exists on this cue sheet.
         </div>
       )}
       <button
