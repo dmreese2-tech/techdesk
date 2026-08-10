@@ -679,38 +679,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     musicSections, musicSectionOrder, inventoryCategories, inventoryCategoryOrder, cueDepts, cueDeptOrder,
   ]);
 
-  function resetAllData() {
-    setShows(seedShows);
-    setCrew(seedCrew);
-    setCalls(seedCalls);
-    setCurrentUserId(null);
-    setActors(seedActors);
-    setCurrentActorId(null);
-    setStaff(seedStaff);
-    setCurrentStaffId(null);
-    setMusicians(seedMusicians);
-    setCurrentMusicianId(null);
-    setInventory(seedInventory);
-    setCueSheets(seedCueSheets);
-    setVenues(seedVenues);
-    setLocations(seedLocations);
-    setInstruments(seedInstruments);
-    setOrgLogo('');
-    setDepartments(INITIAL_DEPARTMENTS);
-    setDepartmentOrder(INITIAL_DEPARTMENT_ORDER);
-    setCastTypes(INITIAL_CAST_TYPES);
-    setCastTypeOrder(INITIAL_CAST_TYPE_ORDER);
-    setStaffAreas(INITIAL_STAFF_AREAS);
-    setStaffAreaOrder(INITIAL_STAFF_AREA_ORDER);
-    setMusicSections(INITIAL_MUSIC_SECTIONS);
-    setMusicSectionOrder(INITIAL_MUSIC_SECTION_ORDER);
-    setInventoryCategories(INITIAL_INVENTORY_CATEGORIES);
-    setInventoryCategoryOrder(INITIAL_INVENTORY_CATEGORY_ORDER);
-    setCueDepts(INITIAL_CUE_DEPTS);
-    setCueDeptOrder(Object.keys(INITIAL_CUE_DEPTS));
-    setFilter('all');
-    setCurrentShowId(null);
-  }
 
   // The schedule is the source of truth. Editing a date updates the call
   // that was generated from it; removing a date retires that call (and
@@ -1087,7 +1055,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           <ActorsModule show={currentShow} shows={shows} actors={actors} setActors={setActors} currentUserId={currentActorId} setCurrentUserId={setCurrentActorId} CAST_TYPES={castTypes} CAST_TYPE_ORDER={castTypeOrder} characters={currentShow?.characters || []} />
         )}
         {active === 'musicians' && (
-          <MusiciansModule show={currentShow} shows={shows} musicians={musicians} setMusicians={setMusicians} currentUserId={currentMusicianId} setCurrentUserId={setCurrentMusicianId} MUSIC_SECTIONS={musicSections} MUSIC_SECTION_ORDER={musicSectionOrder} instruments={instruments} positions={positions.musician} />
+          <MusiciansModule show={currentShow} shows={shows} musicians={musicians} setMusicians={setMusicians} currentUserId={currentMusicianId} setCurrentUserId={setCurrentMusicianId} MUSIC_SECTIONS={musicSections} MUSIC_SECTION_ORDER={musicSectionOrder} positions={positions.musician} />
         )}
         {active === 'staff' && (
           <StaffModule show={currentShow} shows={shows} staff={staff} setStaff={setStaff} currentUserId={currentStaffId} setCurrentUserId={setCurrentStaffId} STAFF_AREAS={staffAreas} STAFF_AREA_ORDER={staffAreaOrder} positions={positions.staff} />
@@ -1163,9 +1131,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             setVenues={setVenues}
             locations={locations}
             setLocations={setLocations}
-            instruments={instruments}
-            setInstruments={setInstruments}
-            onReset={resetAllData}
             DEPARTMENTS={departments}
             setDEPARTMENTS={setDepartments}
             DEPARTMENT_ORDER={departmentOrder}
@@ -1190,8 +1155,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             setCUE_DEPTS={setCueDepts}
             CUE_DEPT_ORDER={cueDeptOrder}
             setCUE_DEPT_ORDER={setCueDeptOrder}
-            lastSavedAt={lastSavedAt}
-            persistenceError={persistenceError}
             orgId={orgId}
             onSignOut={onSignOut}
             isAdmin={isAdmin}

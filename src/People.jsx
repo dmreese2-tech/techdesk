@@ -908,10 +908,13 @@ export function StaffModule({ show, shows, staff, setStaff, currentUserId, setCu
     />
   );
 }
-export function MusiciansModule({ show, shows, musicians, setMusicians, currentUserId, setCurrentUserId, MUSIC_SECTIONS, MUSIC_SECTION_ORDER, instruments, positions }) {
+export function MusiciansModule({ show, shows, musicians, setMusicians, currentUserId, setCurrentUserId, MUSIC_SECTIONS, MUSIC_SECTION_ORDER, positions }) {
   // Band positions are the chairs (Reed 1, Keys 2). If none are set up yet the
   // picker falls back to the instrument list, which is what it used before.
-  const chairOptions = positions && positions.length ? positions : instruments;
+  // Band positions are the chairs (Reed 1, Keys 2). With none set up the
+  // picker falls back to free text rather than to a second list that meant
+  // almost the same thing.
+  const chairOptions = positions && positions.length ? positions : undefined;
   return (
     <PeopleModule
       show={show}

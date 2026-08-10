@@ -118,15 +118,15 @@ export default function Auth({ onReady, forcePicker = false }) {
     setError('');
     setBusy(true);
     try {
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !userData?.user) {
-        throw new Error('Your session isn\u2019t valid anymore — sign out and sign back in, then try again.');
-      }
-      const { error: memErr } = await supabase.from('org_members').insert({ org_id: joinOrgId.trim(), user_id: userData.user.id, role: 'member' });
-      if (memErr) throw memErr;
-      onReady(joinOrgId.trim());
+      // Joining goes through the database rather than a direct insert. A
+      // stranger cannot read `orgs` to find the company they are joining, which
+      // is the point — the code is the only way in, and it can be rotated.
+      const { data: joinedOrgId, error: joinErr } = await supabase.rpc('join_org_by_code', { code: joinOrgId.trim() });
+      if (joinErr) throw joinErr;
+      if (!joinedOrgId) throw new Error('That invite code does not match a company.');
+      onReady(joinedOrgId);
     } catch (err) {
-      setError(err.message && err.message.includes('valid') ? err.message : 'Could not join — check the company ID with your TD.');
+      setError(err.message || 'Could not join — check the invite code with your TD.');
     } finally {
       setBusy(false);
     }
@@ -183,7 +183,7 @@ export default function Auth({ onReady, forcePicker = false }) {
         ) : (
           <form onSubmit={handleJoinOrg} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ color: COLOR.textFaint, fontSize: 12 }}>Ask your TD or another admin for your company's ID (Settings → Company) and paste it here.</div>
-            <input required placeholder="Company ID" value={joinOrgId} onChange={(e) => setJoinOrgId(e.target.value)} style={inputStyle} />
+            <input required placeholder="Invite code, e.g. K4TM-9QXB" value={joinOrgId} onChange={(e) => setJoinOrgId(e.target.value)} style={inputStyle} />
             <button type="submit" disabled={busy} style={{ ...buttonStyle, opacity: busy ? 0.6 : 1 }}>{busy ? 'Joining…' : 'Join company'}</button>
           </form>
         )}
