@@ -141,7 +141,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
           <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.amber, letterSpacing: '0.08em', marginBottom: 6 }}>
             {claims.length} IDENTITY {claims.length === 1 ? 'CLAIM' : 'CLAIMS'} WAITING
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 720 }}>
             {claims.map((c) => (
               <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.amber}`, borderRadius: 3, padding: '8px 10px' }}>
                 <span className="td-body" style={{ flex: 1, fontSize: 12.5, color: COLOR.textPrimary }}>
@@ -172,92 +172,154 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
 
       {members === null ? (
         <div className="td-body" style={sectionNote}>Loading…</div>
+      ) : members.length === 0 ? (
+        <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint }}>Nobody has an account yet.</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 640 }}>
-          {members.map((m) => {
-            const isMe = m.user_id === me;
-            const tier = tierOf(m);
-            const lastAdmin = tier === 'admin' && admins.length === 1;
-            return (
-              <div
-                key={m.user_id}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px', flexWrap: 'wrap' }}
-              >
-                <span className="td-body" style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: COLOR.textPrimary }}>
-                  {m.email}{isMe ? ' (you)' : ''}
-                  {m.person_name ? (
-                    <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}> — {m.person_name}</span>
-                  ) : (
-                    <span className="td-mono" style={{ fontSize: 10, color: COLOR.amberDim }}> NOT LINKED</span>
-                  )}
-                </span>
-                <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
-                  JOINED {new Date(m.joined_at).toLocaleDateString()}
-                </span>
-                {iAmAdmin ? (
-                  <select
-                    className="td-focusable"
-                    value={tier}
-                    disabled={busyId === m.user_id || lastAdmin}
-                    onChange={(e) => changeTier(m, e.target.value)}
-                    title={TIER_META[tier]?.note}
-                    style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '4px 6px' }}
+        // A table, because this is five facts about each of the same kind of
+        // thing and the eye wants to read down a column — "who has not been
+        // linked yet" is a glance, not a hunt through stacked cards.
+        <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4, maxWidth: 1040 }}>
+          <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Name', 'Email', 'Joined', 'Type', ''].map((h, i) => (
+                  <th
+                    key={h || `a${i}`}
+                    className="td-mono"
+                    style={{
+                      textAlign: i === 4 ? 'right' : 'left',
+                      fontSize: 9.5,
+                      fontWeight: 400,
+                      color: COLOR.textFaint,
+                      letterSpacing: '0.08em',
+                      padding: '9px 10px',
+                      borderBottom: `1px solid ${COLOR.line}`,
+                      whiteSpace: 'nowrap',
+                    }}
                   >
-                    <option value="admin">Admin</option>
-                    <option value="staff">Staff</option>
-                    <option value="cast">Cast</option>
-                  </select>
-                ) : (
-                  <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>{TIER_META[tier]?.label.toUpperCase() || tier.toUpperCase()}</span>
-                )}
-                {canManage && !m.person_id && (
-                  <select
-                    className="td-focusable"
-                    value=""
-                    disabled={busyId === m.user_id || unclaimed.length === 0}
-                    onChange={(e) => linkTo(m, e.target.value)}
-                    title="Attach this account to someone on the Crew, Actors, Musicians or Staff roster. Until then their positions grant nothing."
-                    style={{ background: COLOR.void, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11.5, padding: '4px 6px', maxWidth: 190 }}
-                  >
-                    <option value="">{unclaimed.length ? 'Link to roster…' : 'Nobody unlinked'}</option>
-                    {unclaimed.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name} — {p.kind}</option>
-                    ))}
-                  </select>
-                )}
-                {canManage && m.person_id && (
-                  <button
-                    className="td-focusable"
-                    disabled={busyId === m.user_id}
-                    onClick={() => unlink(m)}
-                    title={`Detach this account from ${m.person_name}`}
-                    style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 8px', cursor: 'pointer' }}
-                  >
-                    Unlink
-                  </button>
-                )}
-                {iAmAdmin && !isMe && (
-                  <button
-                    className="td-focusable"
-                    disabled={busyId === m.user_id || lastAdmin}
-                    onClick={() => removeMember(m)}
-                    style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 8px', cursor: busyId === m.user_id || lastAdmin ? 'not-allowed' : 'pointer' }}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                    {h.toUpperCase()}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {members.map((m, rowIndex) => {
+                const isMe = m.user_id === me;
+                const tier = tierOf(m);
+                const lastAdmin = tier === 'admin' && admins.length === 1;
+                const cell = {
+                  padding: '9px 10px',
+                  borderTop: rowIndex === 0 ? 'none' : `1px solid ${COLOR.line}`,
+                  verticalAlign: 'middle',
+                };
+                return (
+                  <tr key={m.user_id} style={{ opacity: busyId === m.user_id ? 0.55 : 1 }}>
+                    <td style={{ ...cell, maxWidth: 132 }}>
+                      {m.person_name ? (
+                        <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textPrimary, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.person_name}>
+                          {m.person_name}
+                        </span>
+                      ) : (
+                        // Not an error — the claim flow needed an email field
+                        // only Crew had, so whole rooms of people sat here.
+                        // It is a row that wants an action, not a fault.
+                        <span className="td-mono" style={{ fontSize: 10, color: COLOR.amberDim }} title="No roster person is attached to this account yet. Until one is, their positions grant nothing.">
+                          NOT LINKED
+                        </span>
+                      )}
+                      {isMe && <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint }}> YOU</span>}
+                    </td>
+
+                    <td style={{ ...cell, maxWidth: 176 }}>
+                      <span className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.email}>
+                        {m.email}
+                      </span>
+                    </td>
+
+                    <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                      <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint }}>
+                        {m.joined_at ? new Date(m.joined_at).toLocaleDateString() : '—'}
+                      </span>
+                    </td>
+
+                    <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                      {iAmAdmin ? (
+                        <select
+                          className="td-focusable"
+                          value={tier}
+                          disabled={busyId === m.user_id || lastAdmin}
+                          onChange={(e) => changeTier(m, e.target.value)}
+                          title={lastAdmin ? 'The last admin cannot be demoted — promote someone else first.' : TIER_META[tier]?.note}
+                          aria-label={`Account type for ${m.email}`}
+                          style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '4px 6px' }}
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="staff">Staff</option>
+                          <option value="cast">Cast</option>
+                        </select>
+                      ) : (
+                        <span className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted }}>
+                          {TIER_META[tier]?.label.toUpperCase() || tier.toUpperCase()}
+                        </span>
+                      )}
+                    </td>
+
+                    <td style={{ ...cell, textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {canManage && !m.person_id && (
+                          <select
+                            className="td-focusable"
+                            value=""
+                            disabled={busyId === m.user_id || unclaimed.length === 0}
+                            onChange={(e) => linkTo(m, e.target.value)}
+                            title="Attach this account to someone on the Crew, Actors, Musicians or Staff roster. Until then their positions grant nothing."
+                            aria-label={`Link ${m.email} to a roster person`}
+                            style={{ background: COLOR.void, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11.5, padding: '4px 6px', maxWidth: 140 }}
+                          >
+                            <option value="">{unclaimed.length ? 'Link to roster…' : 'Nobody unlinked'}</option>
+                            {unclaimed.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name} — {p.kind}</option>
+                            ))}
+                          </select>
+                        )}
+                        {canManage && m.person_id && (
+                          <button
+                            className="td-focusable"
+                            disabled={busyId === m.user_id}
+                            onClick={() => unlink(m)}
+                            title={`Detach this account from ${m.person_name}. They stay on the roster and keep their account.`}
+                            style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 9px', cursor: 'pointer' }}
+                          >
+                            Unlink
+                          </button>
+                        )}
+                        {iAmAdmin && !isMe && (
+                          <button
+                            className="td-focusable"
+                            disabled={busyId === m.user_id || lastAdmin}
+                            onClick={() => removeMember(m)}
+                            title={lastAdmin ? 'The last admin cannot be removed.' : `Remove ${m.email} from this company. Their roster entry stays.`}
+                            style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textFaint, fontSize: 11, padding: '4px 9px', cursor: busyId === m.user_id || lastAdmin ? 'not-allowed' : 'pointer' }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
       {members !== null && admins.length === 1 && (
-        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint, marginTop: 12 }}>
+        <div className="td-body" style={{ ...sectionNote, color: COLOR.textFaint, marginTop: 12, maxWidth: 720 }}>
           The last admin can't be demoted or removed — promote someone else first.
         </div>
       )}
-      <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginTop: 10, maxWidth: 640, lineHeight: 1.55 }}>
+      <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginTop: 10, maxWidth: 720, lineHeight: 1.55 }}>
         <strong style={{ color: COLOR.textMuted }}>Admin</strong> {TIER_META.admin.note}{' '}
         <strong style={{ color: COLOR.textMuted }}>Staff</strong> {TIER_META.staff.note}{' '}
         <strong style={{ color: COLOR.textMuted }}>Cast</strong> {TIER_META.cast.note}

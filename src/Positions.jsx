@@ -36,7 +36,7 @@ const inputStyle = {
 };
 
 const sectionTitle = { fontSize: 13, color: COLOR.textPrimary, letterSpacing: '0.05em' };
-const sectionNote = { fontSize: 11.5, color: COLOR.textFaint, marginTop: 4, marginBottom: 12 };
+const sectionNote = { fontSize: 11.5, color: COLOR.textFaint, marginTop: 4, marginBottom: 12, maxWidth: 720 };
 
 function smallButton(enabled) {
   return {
@@ -56,10 +56,13 @@ function smallButton(enabled) {
 // POSITIONS — company-level job titles for crew, musicians and staff, so the
 // same wording gets used on every show instead of being retyped per assignment.
 // ---------------------------------------------------------------------------
+// Staff first: it is the longest list in every company that has used this, so
+// leading with it keeps the three cards on one visual line instead of leaving
+// Crew and Band stranded beside a column twice their height.
 const POSITION_KINDS = [
+  { key: 'staff', label: 'Staff positions', note: 'Production and front-of-house roles: Stage Manager, Producer, House Manager.', placeholder: 'e.g. Stage Manager' },
   { key: 'crew', label: 'Crew positions', note: 'Deck and booth jobs: Board Op, Deck Head, Fly, Spot, Wardrobe Run.', placeholder: 'e.g. Board Op' },
   { key: 'musician', label: 'Band positions', note: 'Chairs in the pit: Reed 1, Keys 2, Drums. Instruments stay in their own list.', placeholder: 'e.g. Reed 1' },
-  { key: 'staff', label: 'Staff positions', note: 'Production and front-of-house roles: Stage Manager, Producer, House Manager.', placeholder: 'e.g. Stage Manager' },
 ];
 
 // The department a new position is assumed to be in, when the company has one
@@ -67,7 +70,7 @@ const POSITION_KINDS = [
 // one department until somebody says so.
 const DEFAULT_DEPT_FOR_KIND = { musician: 'band' };
 
-export function PositionsPanel({ positions, setPositions, departments = {}, departmentOrder = [], children }) {
+export function PositionsPanel({ positions, setPositions, departments = {}, departmentOrder = [], castEditor, children }) {
   const [drafts, setDrafts] = useState({ crew: '', musician: '', staff: '' });
 
   // Always the normalised shape, whatever is actually stored.
@@ -105,7 +108,11 @@ export function PositionsPanel({ positions, setPositions, departments = {}, depa
         audio plot group correctly.
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+      {/* As many cards per row as the window allows: two on a laptop, all four
+          on a shop monitor. The cap is on the grid rather than the track, so a
+          narrow window still packs two instead of stranding one at its maximum
+          width. 1642 = four cards at 400 plus their gutters. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'start', maxWidth: 1642 }}>
         {POSITION_KINDS.map(({ key, label, note, placeholder }) => (
           <div key={key} style={{ background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: 14 }}>
             <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em' }}>
@@ -173,6 +180,23 @@ export function PositionsPanel({ positions, setPositions, departments = {}, depa
             </div>
           </div>
         ))}
+
+        {/* Cast positions. A cast type is what an actor is cast AS — lead,
+            ensemble, understudy — which makes it a position, not a department,
+            and puts it here with the other three lists rather than off on its
+            own. It carries no department: casting is the show's, not a
+            standing working group's. */}
+        {castEditor && (
+          <div style={{ background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: 14 }}>
+            <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em' }}>
+              CAST POSITIONS
+            </div>
+            <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, margin: '4px 0 10px' }}>
+              How actors are grouped on a cast list: Lead, Ensemble, Understudy.
+            </div>
+            {castEditor}
+          </div>
+        )}
       </div>
 
       {/* What each position can edit lives inside Positions, because it is the

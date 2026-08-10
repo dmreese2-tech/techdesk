@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Check, Image as ImageIcon, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, X } from 'lucide-react';
+import { Building2, Check, Image as ImageIcon, Layers, Pencil, Plus, RotateCcw, Star, Upload, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
@@ -19,7 +19,7 @@ import { stockDepartments } from './shared.jsx';
 // Existing entries keep their original icon; new entries get a shared
 // fallback icon since there's no icon picker here.
 // ---------------------------------------------------------------------------
-export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defaultIcon, colors = false }) {
+export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defaultIcon, colors = false, bare = false }) {
   const [newLabel, setNewLabel] = useState('');
   const [editingKey, setEditingKey] = useState(null);
   const [labelDraft, setLabelDraft] = useState('');
@@ -63,11 +63,13 @@ export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defa
   }
 
   return (
-    <div style={{ border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '12px 14px' }}>
-      <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: note ? 4 : 10 }}>
-        {title.toUpperCase()}
-      </div>
-      {note && <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, marginBottom: 10, lineHeight: 1.4 }}>{note}</div>}
+    <div style={bare ? undefined : { border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '12px 14px' }}>
+      {!bare && (
+        <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: note ? 4 : 10 }}>
+          {title.toUpperCase()}
+        </div>
+      )}
+      {!bare && note && <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, marginBottom: 10, lineHeight: 1.4 }}>{note}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
         {order.filter((key) => map[key]).map((key) => {
@@ -671,7 +673,12 @@ export function SettingsModule({
   }
 
   const sectionTitle = { fontSize: 13, color: COLOR.textMuted, letterSpacing: '0.05em', marginBottom: 4 };
-  const sectionNote = { fontSize: 12.5, color: COLOR.textFaint, marginBottom: 14 };
+  // Prose caps; card grids do not. A sentence 1800px wide is unreadable — the
+  // eye loses the line coming back — but a row of cards has no such limit, so
+  // the two are capped separately rather than the whole page being pinned to
+  // the width of its longest paragraph.
+  const PROSE = 720;
+  const sectionNote = { fontSize: 12.5, color: COLOR.textFaint, marginBottom: 14, maxWidth: PROSE };
 
   const sectionHeader = (Icon, title, note) => (
     <>
@@ -689,9 +696,9 @@ export function SettingsModule({
   const adminOnly = isAdmin === false ? { pointerEvents: 'none', opacity: 0.6 } : undefined;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 32, maxWidth: 640 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32, width: '100%' }}>
       {isAdmin === false && (
-        <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderLeft: `3px solid ${COLOR.blueprint}`, borderRadius: 4, padding: '10px 14px' }}>
+        <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderLeft: `3px solid ${COLOR.blueprint}`, borderRadius: 4, padding: '10px 14px', maxWidth: PROSE }}>
           You can link accounts to the roster below. The company's vocabulary — departments, places, positions and what each one may edit — is admin-only, so the rest of this page is read-only for you.
         </div>
       )}
@@ -701,7 +708,11 @@ export function SettingsModule({
           here too: it is company identity, not a setting of its own. */}
       <div>
         {sectionHeader(Building2, 'Company', 'Who you are and how people get in.')}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(196px, 1fr))', gap: 14, alignItems: 'start', marginBottom: 14 }}>
+        {/* Tracks flex rather than sitting at a fixed max, so a narrow window
+            packs three cards instead of stranding one; the cap is on the grid,
+            which stops four cards stretching to 500px each on a shop monitor.
+            1322 = four cards at 320 plus their gutters. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, alignItems: 'start', maxWidth: 1322, marginBottom: 14 }}>
           <SettingCard label="Logo">
             <div style={adminOnly}>
               <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} heading={false} canEdit={isAdmin !== false} />
@@ -760,9 +771,37 @@ export function SettingsModule({
               </>
             )}
           </SettingCard>
+
+          {/* Places sits in Company because that is what it describes: the
+              rooms this company works in. It was a section of its own between
+              two lists about people, which is not where anybody looked for it. */}
+          <SettingCard label="Places">
+            <div style={{ ...adminOnly, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <ChipEditor
+                label="Venues"
+                note="Offered when a production is added to the board."
+                items={venues}
+                onRemove={removeVenue}
+                value={newVenue}
+                setValue={setNewVenue}
+                onAdd={addVenue}
+                placeholder="e.g. Courtyard Stage"
+              />
+              <ChipEditor
+                label="Locations"
+                note="Where things are kept — inventory and set pieces pick from this."
+                items={locations}
+                onRemove={removeLocation}
+                value={newLocation}
+                setValue={setNewLocation}
+                onAdd={addLocation}
+                placeholder="e.g. Paint Loft"
+              />
+            </div>
+          </SettingCard>
         </div>
 
-        <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 14 }}>
+        <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 14, maxWidth: PROSE }}>
           Give the code to teammates so they can join <strong>{orgName}</strong> from the "Join existing" option. Rotate it whenever you like — the old one stops working immediately, which is the point of having one.
         </div>
 
@@ -780,6 +819,7 @@ export function SettingsModule({
           departments as the spine it would be a category of one. */}
       <div style={adminOnly}>
         {sectionHeader(Layers, 'Departments', "One list, four jobs. A department decides who's on the roster, whether it calls cues, and whether it keeps stock.")}
+        <div style={{ maxWidth: 840 }}>
         <DepartmentsEditor
           map={DEPARTMENTS}
           order={DEPARTMENT_ORDER}
@@ -787,6 +827,7 @@ export function SettingsModule({
           setOrder={setDEPARTMENT_ORDER}
           defaultIcon={Layers}
         />
+        </div>
       </div>
 
       {/* POSITIONS — a job title, the department it sits in, and what it may
@@ -797,6 +838,17 @@ export function SettingsModule({
           setPositions={setPositions}
           departments={DEPARTMENTS}
           departmentOrder={DEPARTMENT_ORDER}
+          castEditor={
+            <TaxonomyEditor
+              bare
+              title="Cast positions"
+              map={CAST_TYPES}
+              order={CAST_TYPE_ORDER}
+              setMap={setCAST_TYPES}
+              setOrder={setCAST_TYPE_ORDER}
+              defaultIcon={Star}
+            />
+          }
         >
           <PositionPermissionsPanel
             orgId={orgId}
@@ -809,51 +861,9 @@ export function SettingsModule({
         </PositionsPanel>
       </div>
 
-      {/* PEOPLE and PLACES — People stays outside the read-only treatment,
-          because linking an account to a roster person is not admin-only. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
-        <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
-
-        <div style={adminOnly}>
-          {sectionHeader(MapPin, 'Places', 'Venues you perform in, locations you store in.')}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <ChipEditor
-              label="Venues"
-              note="Offered when a production is added to the board."
-              items={venues}
-              onRemove={removeVenue}
-              value={newVenue}
-              setValue={setNewVenue}
-              onAdd={addVenue}
-              placeholder="e.g. Courtyard Stage"
-            />
-            <ChipEditor
-              label="Locations"
-              note="Where things are kept — inventory and set pieces pick from this."
-              items={locations}
-              onRemove={removeLocation}
-              value={newLocation}
-              setValue={setNewLocation}
-              onAdd={addLocation}
-              placeholder="e.g. Paint Loft"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* CAST TYPES — its own list, because a cast type isn't a department. */}
-      <div style={adminOnly}>
-        {sectionHeader(Star, 'Cast types', "Its own list, because a cast type isn't a department.")}
-        <TaxonomyEditor
-          title="Cast types"
-          note="How actors are grouped — lead, ensemble, understudy..."
-          map={CAST_TYPES}
-          order={CAST_TYPE_ORDER}
-          setMap={setCAST_TYPES}
-          setOrder={setCAST_TYPE_ORDER}
-          defaultIcon={Star}
-        />
-      </div>
+      {/* PEOPLE — outside the read-only treatment, because linking an account
+          to a roster person is not admin-only. */}
+      <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
     </div>
   );
 }
