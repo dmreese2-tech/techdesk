@@ -49,6 +49,17 @@ export const FONTS = (
     .td-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .td-scrollbar::-webkit-scrollbar-thumb { background: ${COLOR.line}; border-radius: 3px; }
 
+    /* Every input in this app is styled width: 100% with padding and a border.
+       Under the default content-box that means the element renders WIDER than
+       the column it sits in — a 66px grid cell holding an input with 8px
+       padding and a 1px border draws 84px, overflows by 18, and paints over
+       whatever is next to it. That is what made the cue box sit on top of the
+       stock checkbox, and it was never a gap problem: no gap survives an
+       element 18px too wide. */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
     /* The page itself, not just the app shell — otherwise the browser's default
            8px body margin leaves a white frame around a full-bleed dark UI. */
         html, body, #root {

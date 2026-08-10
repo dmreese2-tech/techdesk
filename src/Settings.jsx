@@ -252,7 +252,10 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
   // otherwise land on the neighbour. The trailing 30px column separates the
   // remove button from the stock toggle — "change a flag" and "delete a
   // department" should not be a 8px slip apart.
-  const GRID = 'minmax(0, 14px) minmax(0, 1fr) 66px 62px 30px';
+  // Widths are the whole control now that box-sizing is border-box, so the cue
+  // column has to hold its own padding: 74px leaves ~56px of text, enough for
+  // SCENE, which is the longest prefix anyone has used.
+  const GRID = 'minmax(0, 14px) minmax(0, 1fr) 74px 62px 30px';
   const GAP = 14;
   // Renaming swaps a text node for an input. Without a floor the whole row
   // grew as you clicked into it and everything below jumped.
