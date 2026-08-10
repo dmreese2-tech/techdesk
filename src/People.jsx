@@ -157,7 +157,7 @@ export function PeopleSignIn({ personLabel, roleLabel, rolePlaceholder, roleOpti
   return (
     <div style={{ background: COLOR.card, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 16, marginBottom: 20 }}>
       {step === 'name' ? (
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14 }}>
           <div style={{ flex: 1, maxWidth: 260 }}>
             <label className="td-mono" style={labelStyle}>WHO'S SIGNING ON?</label>
             <input
@@ -445,26 +445,31 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
     );
   }
 
+  // A name that is too long ellipsises rather than widening the row. The row
+  // lives in a grid column next to another department's roster, and anything
+  // that cannot shrink here gets painted over that neighbour.
+  const truncate = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+
   return (
+    <div style={{ padding: '10px 4px', borderBottom: `1px solid ${COLOR.line}`, minWidth: 0 }}>
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '10px 4px',
-        borderBottom: `1px solid ${COLOR.line}`,
         gap: 12,
+        minWidth: 0,
       }}
     >
-      <div style={{ minWidth: 160 }}>
-        <div className="td-body" style={{ fontSize: 13.5, color: COLOR.textPrimary, fontWeight: 500 }}>{person.name}</div>
+      <div style={{ minWidth: 0, flex: '0 1 auto' }}>
+        <div className="td-body" style={{ fontSize: 13.5, color: COLOR.textPrimary, fontWeight: 500, ...truncate }}>{person.name}</div>
         {show && (
-          <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint, marginTop: 2, fontStyle: assignment ? 'normal' : 'italic' }}>
+          <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint, marginTop: 2, fontStyle: assignment ? 'normal' : 'italic', ...truncate }}>
             {assignment ? assignment.roleTitle : `Not on ${show.title}`}
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flex: 1 }}>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
         {history.map((a) => {
           const s = shows.find((sh) => sh.id === a.showId);
           return (
@@ -484,7 +489,7 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
         {person.phone && (
           <a href={`tel:${person.phone}`} className="td-focusable" style={{ color: COLOR.textFaint }} aria-label={`Call ${person.name}`}>
             <Phone size={13} strokeWidth={1.75} />
@@ -506,52 +511,25 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
         )}
         {Icon && <Icon size={13} color={COLOR.textFaint} strokeWidth={1.75} />}
         {show && assignment && (
-          confirmingRemove ? (
-            <>
-              <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber }}>OFF {show.title.toUpperCase()}?</span>
-              <button onClick={takeOffShow} className="td-focusable" style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '3px 9px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
-                Remove
-              </button>
-              <button onClick={() => setConfirmingRemove(false)} className="td-focusable" style={{ background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 9px', fontSize: 10.5, cursor: 'pointer' }}>
-                Keep
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setConfirmingRemove(true)}
-              className="td-focusable"
-              title={`Take ${person.name} off ${show.title}. They stay on the company roster.`}
-              aria-label={`Take ${person.name} off ${show.title}`}
-              style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
-            >
-              <UserMinus size={13} strokeWidth={1.75} />
-            </button>
-          )
-        )}
-        {confirmingDelete ? (
-          <>
-            <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, textAlign: 'right' }}>
-              DELETE FROM COMPANY?{(person.assignments || []).length ? ` ON ${(person.assignments || []).length} SHOW${(person.assignments || []).length === 1 ? '' : 'S'}` : ''}
-              {person.userId ? ' — an account is linked to them' : ''}
-            </span>
-            <button onClick={deleteFromCompany} className="td-focusable" style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '3px 9px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
-              Delete
-            </button>
-            <button onClick={() => setConfirmingDelete(false)} className="td-focusable" style={{ background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 9px', fontSize: 10.5, cursor: 'pointer' }}>
-              Cancel
-            </button>
-          </>
-        ) : (
           <button
-            onClick={() => { setConfirmingDelete(true); setConfirmingRemove(false); }}
+            onClick={() => { setConfirmingRemove((v) => !v); setConfirmingDelete(false); }}
             className="td-focusable"
-            title={`Remove ${person.name} from the company roster entirely — every production, not just this one.`}
-            aria-label={`Remove ${person.name} from the company`}
-            style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+            title={`Take ${person.name} off ${show.title}. They stay on the company roster.`}
+            aria-label={`Take ${person.name} off ${show.title}`}
+            style={{ background: 'none', border: 'none', color: confirmingRemove ? COLOR.amber : COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
           >
-            <Trash2 size={13} strokeWidth={1.75} />
+            <UserMinus size={13} strokeWidth={1.75} />
           </button>
         )}
+        <button
+          onClick={() => { setConfirmingDelete((v) => !v); setConfirmingRemove(false); }}
+          className="td-focusable"
+          title={`Remove ${person.name} from the company roster entirely — every production, not just this one.`}
+          aria-label={`Remove ${person.name} from the company`}
+          style={{ background: 'none', border: 'none', color: confirmingDelete ? COLOR.amber : COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+        >
+          <Trash2 size={13} strokeWidth={1.75} />
+        </button>
         {!show || assignment ? (
           <button onClick={startEdit} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label={`Edit ${person.name}`}>
             <Pencil size={13} strokeWidth={1.75} />
@@ -566,6 +544,53 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
           </button>
         )}
       </div>
+    </div>
+
+    {/* Confirmations get their own line rather than being squeezed into the
+        icon strip. Squeezed into a row that could not shrink, the Delete
+        button rendered on top of the NEXT DEPARTMENT'S roster — an
+        irreversible control sitting over a different person's name. */}
+    {(confirmingRemove || confirmingDelete) && (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+          marginTop: 8,
+          padding: '8px 10px',
+          background: COLOR.void,
+          border: `1px solid ${COLOR.amberDim}`,
+          borderRadius: 3,
+        }}
+      >
+        <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, flex: 1, minWidth: 120, lineHeight: 1.5 }}>
+          {confirmingDelete ? (
+            <>
+              DELETE {person.name.toUpperCase()} FROM THE COMPANY?
+              {(person.assignments || []).length ? ` ON ${(person.assignments || []).length} SHOW${(person.assignments || []).length === 1 ? '' : 'S'}` : ''}
+              {person.userId ? ' — AN ACCOUNT IS LINKED TO THEM' : ''}
+            </>
+          ) : (
+            <>TAKE {person.name.toUpperCase()} OFF {(show?.title || 'THIS SHOW').toUpperCase()}?</>
+          )}
+        </span>
+        <button
+          onClick={confirmingDelete ? deleteFromCompany : takeOffShow}
+          className="td-focusable"
+          style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '4px 11px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}
+        >
+          {confirmingDelete ? 'Delete' : 'Remove'}
+        </button>
+        <button
+          onClick={() => { setConfirmingDelete(false); setConfirmingRemove(false); }}
+          className="td-focusable"
+          style={{ background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '4px 11px', fontSize: 10.5, cursor: 'pointer' }}
+        >
+          {confirmingDelete ? 'Cancel' : 'Keep'}
+        </button>
+      </div>
+    )}
     </div>
   );
 }
@@ -602,7 +627,7 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
             const entry = categoryMap[c];
             const Icon = entry?.icon || AlertTriangle;
             return (
-              <div key={c}>
+              <div key={c} style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
                   <Icon size={14} color={entry ? COLOR.textMuted : COLOR.amber} strokeWidth={1.75} />
                   <span className="td-display" style={{ fontSize: 13, color: entry ? COLOR.textMuted : COLOR.amber, letterSpacing: '0.05em' }} title={entry ? undefined : `${c} is not a department any more — re-file these people`}>

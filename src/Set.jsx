@@ -96,7 +96,7 @@ export function SetPieceForm({ show, inventory, setInventory, locations, initial
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.7fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) 110px minmax(0, 1fr)', gap: 16 }}>
         <div>
           <label className="td-mono" style={labelStyle}>NAME</label>
           <input className="td-focusable" style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. USR Platform Unit" />
@@ -140,7 +140,7 @@ export function SetPieceForm({ show, inventory, setInventory, locations, initial
               creatingItemFor === c.id ? (
                 <div key={c.id} style={{ background: COLOR.panel, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 12 }}>
                   <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.blueprint, letterSpacing: '0.04em', marginBottom: 8 }}>NEW INVENTORY ITEM</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.7fr 1fr', gap: 8, marginBottom: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) 90px minmax(0, 1fr)', gap: 12, marginBottom: 8 }}>
                     <input className="td-focusable" style={inputStyle} value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} placeholder="e.g. Stair Unit, 3-step" />
                     <select className="td-focusable" style={inputStyle} value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}>
                       {INVENTORY_CATEGORY_ORDER.map((cat) => (

@@ -248,14 +248,22 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
 
   const visible = order.filter((key) => map[key]);
   const headerCell = { fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em' };
-  const GRID = '14px 1fr 62px 58px 22px';
+  // 14px gaps, not 8: the focus ring is drawn outside the control and would
+  // otherwise land on the neighbour. The trailing 30px column separates the
+  // remove button from the stock toggle — "change a flag" and "delete a
+  // department" should not be a 8px slip apart.
+  const GRID = 'minmax(0, 14px) minmax(0, 1fr) 66px 62px 30px';
+  const GAP = 14;
+  // Renaming swaps a text node for an input. Without a floor the whole row
+  // grew as you clicked into it and everything below jumped.
+  const ROW_MIN_H = 30;
 
   return (
     <div style={{ border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '12px 14px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, alignItems: 'center', marginBottom: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: GAP, alignItems: 'center', marginBottom: 10 }}>
         <span />
         <span className="td-mono" style={headerCell}>DEPARTMENT</span>
-        <span className="td-mono" style={headerCell} title="The prefix this department's cues carry. Blank if it doesn't call cues.">CUE</span>
+        <span className="td-mono" style={{ ...headerCell, textAlign: 'center' }} title="The prefix this department's cues carry. Blank if it doesn't call cues.">CUE</span>
         <span className="td-mono" style={headerCell} title="Whether this department keeps stock in the inventory.">STOCK</span>
         <span />
       </div>
@@ -265,7 +273,7 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
           const entry = map[key];
           const Icon = entry.icon || defaultIcon;
           return (
-            <div key={key} style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, alignItems: 'center' }}>
+            <div key={key} style={{ display: 'grid', gridTemplateColumns: GRID, gap: GAP, alignItems: 'center', minHeight: ROW_MIN_H }}>
               {/* The swatch is the control. A native colour input is ugly but it
                   is also the one every OS already knows how to drive, and this
                   is a setting people touch once a season. */}
@@ -282,7 +290,7 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
               </label>
 
               {editingKey === key ? (
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
                   <input
                     className="td-focusable"
                     autoFocus
@@ -319,12 +327,14 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
                 style={{ ...inputStyle, width: '100%', textAlign: 'center', letterSpacing: '0.06em', color: entry.cue ? COLOR.textPrimary : COLOR.textFaint }}
               />
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: COLOR.textFaint, cursor: 'pointer' }} title={`Does ${entry.label} keep stock?`}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: entry.stock ? COLOR.textMuted : COLOR.textFaint, cursor: 'pointer' }} title={`Does ${entry.label} keep stock?`}>
                 <input
+                  className="td-focusable"
                   type="checkbox"
                   checked={!!entry.stock}
                   onChange={(e) => patch(key, { stock: e.target.checked })}
                   aria-label={`${entry.label} keeps stock`}
+                  style={{ margin: 0 }}
                 />
                 {entry.stock ? 'Yes' : 'No'}
               </label>
@@ -688,7 +698,7 @@ export function SettingsModule({
           here too: it is company identity, not a setting of its own. */}
       <div>
         {sectionHeader(Building2, 'Company', 'Who you are and how people get in.')}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(196px, 1fr))', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(196px, 1fr))', gap: 14, alignItems: 'start', marginBottom: 14 }}>
           <SettingCard label="Logo">
             <div style={adminOnly}>
               <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} heading={false} canEdit={isAdmin !== false} />
@@ -729,15 +739,22 @@ export function SettingsModule({
                 {inviteTier === 'staff' ? 'Staff' : 'Cast'}
               </div>
             ) : (
-              <select
-                className="td-focusable"
-                value={inviteTier}
-                onChange={(e) => saveInviteTier(e.target.value)}
-                style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12, padding: '5px 8px', width: '100%' }}
-              >
-                <option value="cast">Cast — reads only what concerns them</option>
-                <option value="staff">Staff — reads the whole company</option>
-              </select>
+              <>
+                <select
+                  className="td-focusable"
+                  value={inviteTier}
+                  onChange={(e) => saveInviteTier(e.target.value)}
+                  style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12, padding: '5px 8px', width: '100%', maxWidth: '100%' }}
+                >
+                  <option value="cast">Cast</option>
+                  <option value="staff">Staff</option>
+                </select>
+                {/* The explanation was inside the option label, where a card
+                    this narrow cut it in half. */}
+                <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, marginTop: 7, lineHeight: 1.45 }}>
+                  {inviteTier === 'staff' ? 'Reads the whole company.' : 'Reads only what concerns them.'}
+                </div>
+              </>
             )}
           </SettingCard>
         </div>

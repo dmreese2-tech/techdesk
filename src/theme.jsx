@@ -58,9 +58,14 @@ export const FONTS = (
           background: #0B0E11;
         }
 
-        .td-focusable:focus-visible {
+        /* An outline takes no layout space, so the ring is drawn on whatever sits
+       next to the focused control. At offset 2 it reached 4px out and touched
+       any neighbour less than 12px away — which was most of them. Offset 1
+       reaches 3px, stays clearly visible, and gives every side-by-side pair in
+       the app room without each one having to be widened by hand. */
+    .td-focusable:focus-visible {
       outline: 2px solid ${COLOR.amber};
-      outline-offset: 2px;
+      outline-offset: 1px;
     }
 
     @media (prefers-reduced-motion: reduce) {
