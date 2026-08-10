@@ -124,10 +124,10 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-        <span className="td-display" style={sectionTitle}>Members</span>
+        <span className="td-display" style={sectionTitle}>People</span>
       </div>
       <div className="td-body" style={sectionNote}>
-        Everyone with an account on this company. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
+        Accounts, and which roster person each one is. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
       </div>
 
       {error && (

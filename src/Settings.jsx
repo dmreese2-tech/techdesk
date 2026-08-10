@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Check, Image as ImageIcon, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, Users, X } from 'lucide-react';
+import { Building2, Check, Image as ImageIcon, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
@@ -429,7 +429,10 @@ function shrinkToDataUrl(file) {
   });
 }
 
-export function CompanyLogoPanel({ orgLogo, setOrgLogo, sectionTitle, sectionNote }) {
+// `heading` off renders just the control, for embedding as a card inside the
+// Company section — which is where a logo belongs, being company identity
+// rather than a setting in its own right.
+export function CompanyLogoPanel({ orgLogo, setOrgLogo, sectionTitle, sectionNote, heading = true, canEdit = true }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const inputRef = React.useRef(null);
@@ -459,15 +462,19 @@ export function CompanyLogoPanel({ orgLogo, setOrgLogo, sectionTitle, sectionNot
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <ImageIcon size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-        <span className="td-display" style={sectionTitle}>Company Logo</span>
-      </div>
-      <div className="td-body" style={sectionNote}>
-        Appears in the top bar just before the company name, next to the Tech Desk mark — it sits alongside the app logo rather than replacing it. A wide image with a transparent background reads best.
-      </div>
+      {heading && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <ImageIcon size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+            <span className="td-display" style={sectionTitle}>Company Logo</span>
+          </div>
+          <div className="td-body" style={sectionNote}>
+            Appears in the top bar just before the company name, next to the Tech Desk mark — it sits alongside the app logo rather than replacing it. A wide image with a transparent background reads best.
+          </div>
+        </>
+      )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div
           style={{
             display: 'flex',
@@ -489,15 +496,15 @@ export function CompanyLogoPanel({ orgLogo, setOrgLogo, sectionTitle, sectionNot
         </div>
 
         <input ref={inputRef} type="file" accept="image/*" onChange={onPick} style={{ display: 'none' }} />
-        <button
+        {canEdit && <button
           onClick={() => inputRef.current && inputRef.current.click()}
           disabled={busy}
           className="td-focusable"
           style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', color: COLOR.textPrimary, border: `1px solid ${COLOR.lineBright}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}
         >
           <Upload size={13} /> {busy ? 'Working…' : orgLogo ? 'Replace logo' : 'Upload logo'}
-        </button>
-        {orgLogo && (
+        </button>}
+        {canEdit && orgLogo && (
           <button
             onClick={() => { setOrgLogo(''); setError(''); }}
             className="td-focusable"
@@ -511,6 +518,74 @@ export function CompanyLogoPanel({ orgLogo, setOrgLogo, sectionTitle, sectionNot
       {error && (
         <div className="td-body" style={{ fontSize: 12, color: COLOR.amber, marginTop: 10 }}>{error}</div>
       )}
+    </div>
+  );
+}
+
+// A labelled card. Company is three of these side by side.
+function SettingCard({ label, children }) {
+  return (
+    <div style={{ background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '11px 13px' }}>
+      <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em', marginBottom: 8 }}>
+        {label.toUpperCase()}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// A list of removable chips with an add field. Venues and locations were two
+// copies of this markup distinguished only by their notes, which is what made
+// them look like two subjects instead of one.
+function ChipEditor({ label, note, items, onRemove, value, setValue, onAdd, placeholder }) {
+  return (
+    <div>
+      <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em', marginBottom: 3 }}>
+        {label.toUpperCase()}
+      </div>
+      <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 9 }}>{note}</div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        {items.length === 0 && (
+          <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>None yet.</span>
+        )}
+        {items.map((item) => (
+          <span
+            key={item}
+            className="td-mono"
+            style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5, color: COLOR.textPrimary, border: `1px solid ${COLOR.line}`, borderRadius: 20, padding: '5px 8px 5px 12px' }}
+          >
+            {item}
+            <button
+              onClick={() => onRemove(item)}
+              className="td-focusable"
+              style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+              aria-label={`Remove ${item}`}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="td-focusable"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && onAdd()}
+          placeholder={placeholder}
+          style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px', color: COLOR.textPrimary, fontSize: 13, flex: 1, maxWidth: 280 }}
+        />
+        <button
+          onClick={onAdd}
+          disabled={!value.trim()}
+          className="td-focusable"
+          style={{ background: value.trim() ? COLOR.amber : COLOR.slateDim, color: value.trim() ? COLOR.void : COLOR.textFaint, border: 'none', borderRadius: 3, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: value.trim() ? 'pointer' : 'not-allowed' }}
+        >
+          Add
+        </button>
+      </div>
     </div>
   );
 }
@@ -585,201 +660,118 @@ export function SettingsModule({
   const sectionTitle = { fontSize: 13, color: COLOR.textMuted, letterSpacing: '0.05em', marginBottom: 4 };
   const sectionNote = { fontSize: 12.5, color: COLOR.textFaint, marginBottom: 14 };
 
+  const sectionHeader = (Icon, title, note) => (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <Icon size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+        <span className="td-display" style={sectionTitle}>{title}</span>
+      </div>
+      <div className="td-body" style={sectionNote}>{note}</div>
+    </>
+  );
+
+  // Read-only is applied per section rather than as one wrapper around the
+  // middle of the page, so Company can sit at the top and People can sit
+  // between two admin-only sections without either being greyed out.
+  const adminOnly = isAdmin === false ? { pointerEvents: 'none', opacity: 0.6 } : undefined;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32, maxWidth: 640 }}>
       {isAdmin === false && (
         <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, background: COLOR.card, border: `1px solid ${COLOR.line}`, borderLeft: `3px solid ${COLOR.blueprint}`, borderRadius: 4, padding: '10px 14px' }}>
-          You can link accounts to the roster below. The company's vocabulary — venues, categories, positions and what each one may edit — is admin-only, so the rest of this page is read-only for you.
+          You can link accounts to the roster below. The company's vocabulary — departments, places, positions and what each one may edit — is admin-only, so the rest of this page is read-only for you.
         </div>
       )}
-      <div style={isAdmin === false ? { pointerEvents: 'none', opacity: 0.6, display: 'flex', flexDirection: 'column', gap: 32 } : { display: 'contents' }}>
-      {/* Company Logo */}
-      <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} sectionTitle={sectionTitle} sectionNote={sectionNote} />
 
-      {/* Venues & Spaces */}
+      {/* COMPANY — first, because the invite code is the thing you hand to a new
+          person, and it used to be the last item on a long page. The logo lives
+          here too: it is company identity, not a setting of its own. */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <MapPin size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-          <span className="td-display" style={sectionTitle}>Venues &amp; Spaces</span>
-        </div>
-        <div className="td-body" style={sectionNote}>These appear in the venue list when a production is added to the board.</div>
+        {sectionHeader(Building2, 'Company', 'Who you are and how people get in.')}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(196px, 1fr))', gap: 12, marginBottom: 14 }}>
+          <SettingCard label="Logo">
+            <div style={adminOnly}>
+              <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} heading={false} canEdit={isAdmin !== false} />
+            </div>
+            <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textPrimary, marginTop: 9 }}>{orgName}</div>
+          </SettingCard>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-          {venues.map((v) => (
-            <span
-              key={v}
-              className="td-mono"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                fontSize: 11.5,
-                color: COLOR.textPrimary,
-                border: `1px solid ${COLOR.line}`,
-                borderRadius: 20,
-                padding: '5px 8px 5px 12px',
-              }}
-            >
-              {v}
+          <SettingCard label="Invite code">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+              <code style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 10px', color: COLOR.textPrimary, fontSize: 12.5, letterSpacing: '0.08em', fontFamily: "'IBM Plex Mono', monospace" }}>
+                {inviteCode || '————'}
+              </code>
               <button
-                onClick={() => removeVenue(v)}
+                onClick={() => navigator.clipboard && inviteCode && navigator.clipboard.writeText(inviteCode)}
                 className="td-focusable"
-                style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
-                aria-label={`Remove ${v}`}
+                title="Copy the code"
+                style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}
               >
-                <X size={12} />
+                Copy
               </button>
-            </span>
-          ))}
-        </div>
+              {isAdmin !== false && (
+                <button
+                  onClick={rotateCode}
+                  disabled={rotating}
+                  className="td-focusable"
+                  title="Issue a new code. Anyone still holding the old one can no longer join."
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.lineBright}`, borderRadius: 3, padding: '5px 9px', fontSize: 11, cursor: rotating ? 'default' : 'pointer' }}
+                >
+                  <RotateCcw size={12} /> {rotating ? 'Rotating…' : 'Rotate'}
+                </button>
+              )}
+            </div>
+          </SettingCard>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            className="td-focusable"
-            value={newVenue}
-            onChange={(e) => setNewVenue(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addVenue()}
-            placeholder="Add a space, e.g. Courtyard Stage"
-            style={{
-              background: COLOR.void,
-              border: `1px solid ${COLOR.line}`,
-              borderRadius: 3,
-              padding: '8px 10px',
-              color: COLOR.textPrimary,
-              fontSize: 13,
-              flex: 1,
-              maxWidth: 280,
-            }}
-          />
-          <button
-            onClick={addVenue}
-            disabled={!newVenue.trim()}
-            className="td-focusable"
-            style={{
-              background: newVenue.trim() ? COLOR.amber : COLOR.slateDim,
-              color: newVenue.trim() ? COLOR.void : COLOR.textFaint,
-              border: 'none',
-              borderRadius: 3,
-              padding: '8px 16px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: newVenue.trim() ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Add
-          </button>
-        </div>
-      </div>
-
-      {/* Locations */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Box size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-          <span className="td-display" style={sectionTitle}>Locations</span>
-        </div>
-        <div className="td-body" style={sectionNote}>Storage and staging spots — anywhere a location is picked (inventory, set pieces) pulls from this list.</div>
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-          {locations.map((l) => (
-            <span
-              key={l}
-              className="td-mono"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                fontSize: 11.5,
-                color: COLOR.textPrimary,
-                border: `1px solid ${COLOR.line}`,
-                borderRadius: 20,
-                padding: '5px 8px 5px 12px',
-              }}
-            >
-              {l}
-              <button
-                onClick={() => removeLocation(l)}
+          <SettingCard label="Joins as">
+            {isAdmin === false ? (
+              <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted }}>
+                {inviteTier === 'staff' ? 'Staff' : 'Cast'}
+              </div>
+            ) : (
+              <select
                 className="td-focusable"
-                style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
-                aria-label={`Remove ${l}`}
+                value={inviteTier}
+                onChange={(e) => saveInviteTier(e.target.value)}
+                style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12, padding: '5px 8px', width: '100%' }}
               >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
+                <option value="cast">Cast — reads only what concerns them</option>
+                <option value="staff">Staff — reads the whole company</option>
+              </select>
+            )}
+          </SettingCard>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            className="td-focusable"
-            value={newLocation}
-            onChange={(e) => setNewLocation(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addLocation()}
-            placeholder="Add a location, e.g. Paint Loft"
-            style={{
-              background: COLOR.void,
-              border: `1px solid ${COLOR.line}`,
-              borderRadius: 3,
-              padding: '8px 10px',
-              color: COLOR.textPrimary,
-              fontSize: 13,
-              flex: 1,
-              maxWidth: 280,
-            }}
-          />
-          <button
-            onClick={addLocation}
-            disabled={!newLocation.trim()}
-            className="td-focusable"
-            style={{
-              background: newLocation.trim() ? COLOR.amber : COLOR.slateDim,
-              color: newLocation.trim() ? COLOR.void : COLOR.textFaint,
-              border: 'none',
-              borderRadius: 3,
-              padding: '8px 16px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: newLocation.trim() ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Add
-          </button>
+        <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 14 }}>
+          Give the code to teammates so they can join <strong>{orgName}</strong> from the "Join existing" option. Rotate it whenever you like — the old one stops working immediately, which is the point of having one.
         </div>
+
+        <button
+          onClick={onSignOut}
+          className="td-focusable"
+          style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
+        >
+          Sign out
+        </button>
       </div>
 
-      {/* Categories & taxonomies */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Layers size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-          <span className="td-display" style={sectionTitle}>Categories & taxonomies</span>
-        </div>
-        <div className="td-body" style={sectionNote}>
-          Departments are the company's spine — they thread through Crew, Staff, Band, Inventory, Set, Script and Run of Show. One department decides three things at once: who is on the roster, whether it calls cues, and whether it keeps stock. Cast types are their own list because a cast type isn't a department.
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 14 }}>
-          <DepartmentsEditor
-            map={DEPARTMENTS}
-            order={DEPARTMENT_ORDER}
-            setMap={setDEPARTMENTS}
-            setOrder={setDEPARTMENT_ORDER}
-            defaultIcon={Layers}
-          />
-          <TaxonomyEditor
-            title="Cast types"
-            note="How actors are grouped — lead, ensemble, understudy..."
-            map={CAST_TYPES}
-            order={CAST_TYPE_ORDER}
-            setMap={setCAST_TYPES}
-            setOrder={setCAST_TYPE_ORDER}
-            defaultIcon={Star}
-          />
-        </div>
+      {/* DEPARTMENTS — no longer inside a "Categories & taxonomies" wrapper.
+          That heading was a home for four lists that kept drifting apart; with
+          departments as the spine it would be a category of one. */}
+      <div style={adminOnly}>
+        {sectionHeader(Layers, 'Departments', "One list, four jobs. A department decides who's on the roster, whether it calls cues, and whether it keeps stock.")}
+        <DepartmentsEditor
+          map={DEPARTMENTS}
+          order={DEPARTMENT_ORDER}
+          setMap={setDEPARTMENTS}
+          setOrder={setDEPARTMENT_ORDER}
+          defaultIcon={Layers}
+        />
       </div>
 
-      {/* Members */}
-        {/* Positions, and what each one may edit — the same subject twice, so
-            they sit together: a position is a job title, and a job title is
-            what grants access. */}
+      {/* POSITIONS — a job title, the department it sits in, and what it may
+          edit. The same subject three ways, so it is one panel. */}
+      <div style={adminOnly}>
         <PositionsPanel
           positions={positions}
           setPositions={setPositions}
@@ -795,65 +787,52 @@ export function SettingsModule({
             sectionNote={sectionNote}
           />
         </PositionsPanel>
-
       </div>
 
+      {/* PEOPLE and PLACES — People stays outside the read-only treatment,
+          because linking an account to a roster person is not admin-only. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
         <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
 
-        {/* Company */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-          <span className="td-display" style={sectionTitle}>Company</span>
-        </div>
-        <div className="td-body" style={sectionNote}>
-          Give this code to teammates so they can join <strong>{orgName}</strong> from the "Join existing" option. Rotate it whenever you like — the old one stops working immediately, which is the point of having one.
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          <code style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 12px', color: COLOR.textPrimary, fontSize: 13, letterSpacing: '0.08em', fontFamily: "'IBM Plex Mono', monospace" }}>
-            {inviteCode || '————'}
-          </code>
-          <button
-            onClick={() => navigator.clipboard && inviteCode && navigator.clipboard.writeText(inviteCode)}
-            className="td-focusable"
-            style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 10px', fontSize: 11, cursor: 'pointer' }}
-          >
-            Copy
-          </button>
-          {isAdmin !== false && (
-            <button
-              onClick={rotateCode}
-              disabled={rotating}
-              className="td-focusable"
-              title="Issue a new code. Anyone still holding the old one can no longer join."
-              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.lineBright}`, borderRadius: 3, padding: '6px 10px', fontSize: 11, cursor: rotating ? 'default' : 'pointer' }}
-            >
-              <RotateCcw size={12} /> {rotating ? 'Rotating…' : 'Rotate'}
-            </button>
-          )}
-        </div>
-
-        {isAdmin !== false && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted }}>Someone using the code joins as</span>
-            <select
-              className="td-focusable"
-              value={inviteTier}
-              onChange={(e) => saveInviteTier(e.target.value)}
-              style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12, padding: '5px 8px' }}
-            >
-              <option value="cast">Cast — reads only what concerns them</option>
-              <option value="staff">Staff — reads the whole company</option>
-            </select>
+        <div style={adminOnly}>
+          {sectionHeader(MapPin, 'Places', 'Venues you perform in, locations you store in.')}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <ChipEditor
+              label="Venues"
+              note="Offered when a production is added to the board."
+              items={venues}
+              onRemove={removeVenue}
+              value={newVenue}
+              setValue={setNewVenue}
+              onAdd={addVenue}
+              placeholder="e.g. Courtyard Stage"
+            />
+            <ChipEditor
+              label="Locations"
+              note="Where things are kept — inventory and set pieces pick from this."
+              items={locations}
+              onRemove={removeLocation}
+              value={newLocation}
+              setValue={setNewLocation}
+              onAdd={addLocation}
+              placeholder="e.g. Paint Loft"
+            />
           </div>
-        )}
-        <button
-          onClick={onSignOut}
-          className="td-focusable"
-          style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
-        >
-          Sign out
-        </button>
+        </div>
+      </div>
+
+      {/* CAST TYPES — its own list, because a cast type isn't a department. */}
+      <div style={adminOnly}>
+        {sectionHeader(Star, 'Cast types', "Its own list, because a cast type isn't a department.")}
+        <TaxonomyEditor
+          title="Cast types"
+          note="How actors are grouped — lead, ensemble, understudy..."
+          map={CAST_TYPES}
+          order={CAST_TYPE_ORDER}
+          setMap={setCAST_TYPES}
+          setOrder={setCAST_TYPE_ORDER}
+          defaultIcon={Star}
+        />
       </div>
     </div>
   );
