@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { PanelLeftClose, PanelLeftOpen, Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
-import { STATUS_META, byName } from './shared.jsx';
+import { STATUS_META, byName, assignmentFor } from './shared.jsx';
+import { loadPositionPermissions } from './permissions.js';
 import { StubPanel } from './ui.jsx';
 
 // SHELL — the frame around every section: sidebar rail, show switcher, house
@@ -16,7 +17,7 @@ const TIER_META = {
   cast: { label: 'Cast', note: 'Reads only what concerns them. Edits nothing.' },
 };
 
-export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
+export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote }) {
   const [members, setMembers] = useState(null);
   const [claims, setClaims] = useState([]);
   const [unclaimed, setUnclaimed] = useState([]);
@@ -24,6 +25,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const [me, setMe] = useState(null);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const [positionPerms, setPositionPerms] = useState({});
 
   const load = async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -44,6 +46,14 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
     // linking is gated on this and tier changes are not.
     const { data: manage } = await supabase.rpc('can_manage_roster', { check_org_id: orgId });
     setCanManage(!!manage);
+    // What a position grants is what decides whether someone's access stops at
+    // the productions they are assigned to. Read-only here; the panel that
+    // edits these lives further up the page.
+    try {
+      setPositionPerms(await loadPositionPermissions(orgId));
+    } catch {
+      setPositionPerms({});
+    }
   };
 
   useEffect(() => {
@@ -60,6 +70,41 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   const sortedMembers = members && [...members].sort((a, b) => byName(a.person_name || a.email, b.person_name || b.email));
   const admins = (members || []).filter((m) => tierOf(m) === 'admin');
   const iAmAdmin = !!members && members.some((m) => m.user_id === me && tierOf(m) === 'admin');
+
+  // The roster person an account is linked to, if any.
+  const personFor = (m) => (m.person_id ? ((roster || {})[m.person_kind] || []).find((p) => p.id === m.person_id) : null) || null;
+
+  // Crew carry `role`, everyone else `roleTitle` — the same field under two
+  // names, because the rosters grew separately.
+  const titleOf = (a) => (a ? a.roleTitle || a.role || '' : '');
+
+  // What they are doing on the production currently open. A company-wide
+  // position is still shown against the show they hold it on, because that is
+  // the job; the scope column is what says how far it reaches.
+  const positionFor = (m) => {
+    const person = personFor(m);
+    if (!person) return '';
+    const here = show ? assignmentFor(person, show.id) : null;
+    if (here) return titleOf(here);
+    const any = (person.assignments || []).map(titleOf).filter(Boolean);
+    return any.length ? any[0] : '';
+  };
+
+  // How far someone's write access reaches. Admins bypass the whole
+  // calculation. Otherwise a position marked company-wide holds on every
+  // production, present and future; everything else stops at the shows they
+  // are actually assigned to. See docs/permissions.md.
+  const accessFor = (m) => {
+    if (tierOf(m) === 'admin') return { label: 'Whole company', wide: true, note: 'Admins write everything, on every production.' };
+    const person = personFor(m);
+    if (!person) return { label: '—', wide: false, note: 'No roster person is linked, so no position grants them anything yet.' };
+    const held = (person.assignments || []).map(titleOf).filter(Boolean);
+    const wide = held.find((title) => positionPerms[`${m.person_kind}:${title}`]?.companyWide);
+    if (wide) return { label: 'Whole company', wide: true, note: `${wide} is marked company-wide, so it holds on every production without an assignment.` };
+    if (show && assignmentFor(person, show.id)) return { label: 'This show', wide: false, note: `Assigned to ${show.title}. Their positions grant there and on any other production they are on — nowhere else.` };
+    if (!show) return { label: '—', wide: false, note: 'Open a production to see whether their access reaches it.' };
+    return { label: '—', wide: false, note: `Not on ${show.title}, so their positions grant nothing here.` };
+  };
 
   const changeTier = async (member, tier) => {
     setBusyId(member.user_id);
@@ -182,16 +227,16 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
         // A table, because this is five facts about each of the same kind of
         // thing and the eye wants to read down a column — "who has not been
         // linked yet" is a glance, not a hunt through stacked cards.
-        <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4, maxWidth: 1040 }}>
-          <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse' }}>
+        <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4, maxWidth: 1280 }}>
+          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Name', 'Email', 'Joined', 'Type', ''].map((h, i) => (
+                {['Name', 'Position', 'Access', 'Email', 'Joined', 'Type', ''].map((h, i) => (
                   <th
                     key={h || `a${i}`}
                     className="td-mono"
                     style={{
-                      textAlign: i === 4 ? 'right' : 'left',
+                      textAlign: i === 6 ? 'right' : 'left',
                       fontSize: 9.5,
                       fontWeight: 400,
                       color: COLOR.textFaint,
@@ -211,6 +256,8 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                 const isMe = m.user_id === me;
                 const tier = tierOf(m);
                 const lastAdmin = tier === 'admin' && admins.length === 1;
+                const position = positionFor(m);
+                const access = accessFor(m);
                 const cell = {
                   padding: '9px 10px',
                   borderTop: rowIndex === 0 ? 'none' : `1px solid ${COLOR.line}`,
@@ -218,7 +265,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                 };
                 return (
                   <tr key={m.user_id} style={{ opacity: busyId === m.user_id ? 0.55 : 1 }}>
-                    <td style={{ ...cell, maxWidth: 132 }}>
+                    <td style={{ ...cell, maxWidth: 118 }}>
                       {m.person_name ? (
                         <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textPrimary, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.person_name}>
                           {m.person_name}
@@ -234,7 +281,39 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
                       {isMe && <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint }}> YOU</span>}
                     </td>
 
-                    <td style={{ ...cell, maxWidth: 176 }}>
+                    <td style={{ ...cell, maxWidth: 140 }}>
+                      {position ? (
+                        <span className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={position}>
+                          {position}
+                        </span>
+                      ) : (
+                        <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }} title={m.person_id ? 'Linked, but holding no position on any production yet.' : 'No roster person is linked to this account.'}>—</span>
+                      )}
+                    </td>
+
+                    <td style={{ ...cell, maxWidth: 118 }}>
+                      <span
+                        className="td-mono"
+                        title={access.note}
+                        style={{
+                          fontSize: 9.5,
+                          letterSpacing: '0.06em',
+                          color: access.wide ? COLOR.blueprint : COLOR.textFaint,
+                          border: `1px solid ${access.wide ? COLOR.blueprint : COLOR.line}`,
+                          borderRadius: 20,
+                          padding: '3px 8px',
+                          display: 'inline-block',
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {access.label.toUpperCase()}
+                      </span>
+                    </td>
+
+                    <td style={{ ...cell, maxWidth: 168 }}>
                       <span className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.email}>
                         {m.email}
                       </span>

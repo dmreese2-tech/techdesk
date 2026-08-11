@@ -617,6 +617,7 @@ function ChipEditor({ label, note, items, onRemove, value, setValue, onAdd, plac
 export function SettingsModule({
   positions,
   setPositions,
+  roster, show,
   orgLogo, setOrgLogo,
   venues, setVenues, locations, setLocations,
   DEPARTMENTS, setDEPARTMENTS, DEPARTMENT_ORDER, setDEPARTMENT_ORDER,
@@ -870,7 +871,7 @@ export function SettingsModule({
 
       {/* PEOPLE — outside the read-only treatment, because linking an account
           to a roster person is not admin-only. */}
-      <MembersPanel orgId={orgId} sectionTitle={sectionTitle} sectionNote={sectionNote} />
+      <MembersPanel orgId={orgId} roster={roster} show={show} sectionTitle={sectionTitle} sectionNote={sectionNote} />
     </div>
   );
 }

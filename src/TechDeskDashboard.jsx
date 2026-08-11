@@ -1141,6 +1141,8 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ))}
         {active === 'settings' && (
           <SettingsModule
+            roster={{ crew, actor: actors, staff, musician: musicians }}
+            show={currentShow}
             venues={venues}
             setVenues={setVenues}
             locations={locations}
