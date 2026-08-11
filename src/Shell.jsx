@@ -94,16 +94,41 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
   // calculation. Otherwise a position marked company-wide holds on every
   // production, present and future; everything else stops at the shows they
   // are actually assigned to. See docs/permissions.md.
+  //
+  // This reports CONFIGURED access, never assumed access. POSITION_DEFAULTS
+  // suggests what a props master usually gets, but a suggestion nobody applied
+  // grants nothing, and a column that showed the suggestion would be telling
+  // you the opposite of what the database will do.
   const accessFor = (m) => {
-    if (tierOf(m) === 'admin') return { label: 'Whole company', wide: true, note: 'Admins write everything, on every production.' };
+    if (tierOf(m) === 'admin') return { label: 'Whole company', tone: 'wide', note: 'Admins write everything, on every production.' };
     const person = personFor(m);
-    if (!person) return { label: '—', wide: false, note: 'No roster person is linked, so no position grants them anything yet.' };
+    if (!person) return { label: '—', tone: 'none', note: 'No roster person is linked, so no position grants them anything yet.' };
+
     const held = (person.assignments || []).map(titleOf).filter(Boolean);
-    const wide = held.find((title) => positionPerms[`${m.person_kind}:${title}`]?.companyWide);
-    if (wide) return { label: 'Whole company', wide: true, note: `${wide} is marked company-wide, so it holds on every production without an assignment.` };
-    if (show && assignmentFor(person, show.id)) return { label: 'This show', wide: false, note: `Assigned to ${show.title}. Their positions grant there and on any other production they are on — nowhere else.` };
-    if (!show) return { label: '—', wide: false, note: 'Open a production to see whether their access reaches it.' };
-    return { label: '—', wide: false, note: `Not on ${show.title}, so their positions grant nothing here.` };
+    if (held.length === 0) return { label: '—', tone: 'none', note: 'Linked, but holding no position on any production yet.' };
+
+    const grantOf = (title) => positionPerms[`${m.person_kind}:${title}`];
+    // Same test the position permissions panel uses for READ ONLY: a row that
+    // exists but grants nothing is the same as no row at all.
+    const grants = (g) => !!g && ((g.modules || []).length > 0 || (g.inventoryCategories || []).length > 0);
+
+    const wide = held.find((title) => grantOf(title)?.companyWide);
+    if (wide) return { label: 'Whole company', tone: 'wide', note: `${wide} is marked company-wide, so it holds on every production without an assignment.` };
+
+    const granted = held.filter((title) => grants(grantOf(title)));
+    if (granted.length === 0) {
+      return {
+        label: 'Read only',
+        tone: 'none',
+        note: `Nothing is configured for ${held.join(', ')} under "What each position can edit", so they write nothing anywhere. The suggested defaults are a starting point until somebody applies them.`,
+      };
+    }
+
+    if (!show) return { label: '—', tone: 'none', note: `${granted.join(', ')} carries grants. Open a production to see whether their access reaches it.` };
+    if (assignmentFor(person, show.id)) {
+      return { label: 'This show', tone: 'show', note: `${granted.join(', ')} grants on ${show.title}, and on any other production they are assigned to — nowhere else.` };
+    }
+    return { label: '—', tone: 'none', note: `Not on ${show.title}, so ${granted.join(', ')} grants nothing here.` };
   };
 
   const changeTier = async (member, tier) => {
@@ -298,8 +323,8 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
                         style={{
                           fontSize: 9.5,
                           letterSpacing: '0.06em',
-                          color: access.wide ? COLOR.blueprint : COLOR.textFaint,
-                          border: `1px solid ${access.wide ? COLOR.blueprint : COLOR.line}`,
+                          color: access.tone === 'wide' ? COLOR.blueprint : access.tone === 'show' ? COLOR.textMuted : COLOR.textFaint,
+                          border: `1px solid ${access.tone === 'wide' ? COLOR.blueprint : COLOR.line}`,
                           borderRadius: 20,
                           padding: '3px 8px',
                           display: 'inline-block',
