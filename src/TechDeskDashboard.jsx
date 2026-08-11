@@ -1154,7 +1154,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             CAST_TYPE_ORDER={castTypeOrder}
             setCAST_TYPE_ORDER={setCastTypeOrder}
             orgId={orgId}
-            onSignOut={onSignOut}
             isAdmin={isAdmin}
             positions={positions}
             setPositions={setPositions}

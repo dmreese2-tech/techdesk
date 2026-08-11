@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { PanelLeftClose, PanelLeftOpen, Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
-import { STATUS_META } from './shared.jsx';
+import { STATUS_META, byName } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // SHELL — the frame around every section: sidebar rail, show switcher, house
@@ -54,6 +54,10 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
   // `tier` arrives with 04-accounts-and-identity.sql; until that has run, fall
   // back to the old admin/member role so this panel still works.
   const tierOf = (m) => m.tier || (m.role === 'admin' ? 'admin' : 'staff');
+  // Sorted by the name you would look someone up under, falling back to the
+  // address for an account nobody has linked yet. The RPC returns them by join
+  // date, which is the one order nobody scans a roster in.
+  const sortedMembers = members && [...members].sort((a, b) => byName(a.person_name || a.email, b.person_name || b.email));
   const admins = (members || []).filter((m) => tierOf(m) === 'admin');
   const iAmAdmin = !!members && members.some((m) => m.user_id === me && tierOf(m) === 'admin');
 
@@ -203,7 +207,7 @@ export function MembersPanel({ orgId, sectionTitle, sectionNote }) {
               </tr>
             </thead>
             <tbody>
-              {members.map((m, rowIndex) => {
+              {sortedMembers.map((m, rowIndex) => {
                 const isMe = m.user_id === me;
                 const tier = tierOf(m);
                 const lastAdmin = tier === 'admin' && admins.length === 1;

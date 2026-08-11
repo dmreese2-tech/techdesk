@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { positionList } from './shared.jsx';
+import { byName, positionList } from './shared.jsx';
 
 // ---------------------------------------------------------------------------
 // POSITIONS — company-level job titles for crew, band and staff, so the same
@@ -73,8 +73,9 @@ const DEFAULT_DEPT_FOR_KIND = { musician: 'band' };
 export function PositionsPanel({ positions, setPositions, departments = {}, departmentOrder = [], castEditor, children }) {
   const [drafts, setDrafts] = useState({ crew: '', musician: '', staff: '' });
 
-  // Always the normalised shape, whatever is actually stored.
-  const list = (key) => positionList(positions && positions[key]);
+  // Always the normalised shape, whatever is actually stored, and always
+  // alphabetical — these are lists you scan for one title, not sequences.
+  const list = (key) => positionList(positions && positions[key]).sort((a, b) => byName(a.name, b.name));
   const deptKeys = departmentOrder.filter((d) => departments[d]);
 
   const write = (key, next) => setPositions({ ...positions, [key]: next });

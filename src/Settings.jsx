@@ -5,7 +5,7 @@ import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
 import { PositionsPanel } from './Positions.jsx';
 import { PositionPermissionsPanel } from './PositionPermissions.jsx';
-import { stockDepartments } from './shared.jsx';
+import { byName, sortKeysByLabel, stockDepartments } from './shared.jsx';
 
 // SETTINGS — venues, storage locations, positions, and the two taxonomies that
 // feed the pickers elsewhere: departments and cast types.
@@ -43,14 +43,16 @@ export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defa
   function addEntry() {
     if (!newLabel.trim()) return;
     const key = slugify(newLabel);
-    setMap((prev) => ({ ...prev, [key]: { label: newLabel.trim(), icon: defaultIcon } }));
-    setOrder((prev) => [...prev, key]);
+    const entry = { label: newLabel.trim(), icon: defaultIcon };
+    setMap((prev) => ({ ...prev, [key]: entry }));
+    setOrder((prev) => sortKeysByLabel({ ...map, [key]: entry }, [...prev, key]));
     setNewLabel('');
   }
   function saveLabel(key) {
     const label = labelDraft.trim();
     if (!label) return;
     setMap((prev) => ({ ...prev, [key]: { ...prev[key], label } }));
+    setOrder((prev) => sortKeysByLabel({ ...map, [key]: { ...map[key], label } }, prev));
     setEditingKey(null);
   }
   function removeEntry(key) {
@@ -72,7 +74,7 @@ export function TaxonomyEditor({ title, note, map, order, setMap, setOrder, defa
       {!bare && note && <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, marginBottom: 10, lineHeight: 1.4 }}>{note}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-        {order.filter((key) => map[key]).map((key) => {
+        {sortKeysByLabel(map, order.filter((key) => map[key])).map((key) => {
           const entry = map[key];
           const Icon = entry.icon || defaultIcon;
           return (
@@ -214,8 +216,9 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
     const key = slugify(newLabel);
     // New departments start calling nothing and keeping nothing. Both are one
     // click away, and both are answers only the company can give.
-    setMap((prev) => ({ ...prev, [key]: { label: newLabel.trim(), icon: defaultIcon, color: '#9AA5B1', stock: false } }));
-    setOrder((prev) => [...prev, key]);
+    const entry = { label: newLabel.trim(), icon: defaultIcon, color: '#9AA5B1', stock: false };
+    setMap((prev) => ({ ...prev, [key]: entry }));
+    setOrder((prev) => sortKeysByLabel({ ...map, [key]: entry }, [...prev, key]));
     setNewLabel('');
   }
   function patch(key, fields) {
@@ -225,6 +228,7 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
     const label = labelDraft.trim();
     if (!label) return;
     patch(key, { label });
+    setOrder((prev) => sortKeysByLabel({ ...map, [key]: { ...map[key], label } }, prev));
     setEditingKey(null);
   }
   function setCue(key, raw) {
@@ -248,7 +252,9 @@ export function DepartmentsEditor({ map, order, setMap, setOrder, defaultIcon })
     setOrder((prev) => prev.filter((k) => k !== key));
   }
 
-  const visible = order.filter((key) => map[key]);
+  // Alphabetical. There is no way to hand-order departments, so insertion
+  // order was arbitrary — and thirteen of them in arbitrary order is a hunt.
+  const visible = sortKeysByLabel(map, order.filter((key) => map[key]));
   const headerCell = { fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em' };
   // 14px gaps, not 8: the focus ring is drawn outside the control and would
   // otherwise land on the neighbour. The trailing 30px column separates the
@@ -553,18 +559,21 @@ function SettingCard({ label, children }) {
 // copies of this markup distinguished only by their notes, which is what made
 // them look like two subjects instead of one.
 function ChipEditor({ label, note, items, onRemove, value, setValue, onAdd, placeholder }) {
+  const sorted = [...(items || [])].sort(byName);
   return (
     <div>
-      <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em', marginBottom: 3 }}>
-        {label.toUpperCase()}
-      </div>
+      {label && (
+        <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.08em', marginBottom: 3 }}>
+          {label.toUpperCase()}
+        </div>
+      )}
       <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 9 }}>{note}</div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-        {items.length === 0 && (
+        {sorted.length === 0 && (
           <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>None yet.</span>
         )}
-        {items.map((item) => (
+        {sorted.map((item) => (
           <span
             key={item}
             className="td-mono"
@@ -612,7 +621,7 @@ export function SettingsModule({
   venues, setVenues, locations, setLocations,
   DEPARTMENTS, setDEPARTMENTS, DEPARTMENT_ORDER, setDEPARTMENT_ORDER,
   CAST_TYPES, setCAST_TYPES, CAST_TYPE_ORDER, setCAST_TYPE_ORDER,
-  orgId, onSignOut, isAdmin,
+  orgId, isAdmin,
 }) {
   const [newVenue, setNewVenue] = useState('');
   const [newLocation, setNewLocation] = useState('');
@@ -655,7 +664,7 @@ export function SettingsModule({
   function addVenue() {
     const v = newVenue.trim();
     if (!v || venues.includes(v)) return;
-    setVenues((prev) => [...prev, v]);
+    setVenues((prev) => [...prev, v].sort(byName));
     setNewVenue('');
   }
   function removeVenue(v) {
@@ -665,7 +674,7 @@ export function SettingsModule({
   function addLocation() {
     const l = newLocation.trim();
     if (!l || locations.includes(l)) return;
-    setLocations((prev) => [...prev, l]);
+    setLocations((prev) => [...prev, l].sort(byName));
     setNewLocation('');
   }
   function removeLocation(l) {
@@ -711,8 +720,8 @@ export function SettingsModule({
         {/* Tracks flex rather than sitting at a fixed max, so a narrow window
             packs three cards instead of stranding one; the cap is on the grid,
             which stops four cards stretching to 500px each on a shop monitor.
-            1322 = four cards at 320 plus their gutters. */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, alignItems: 'start', maxWidth: 1322, marginBottom: 14 }}>
+            1656 = five cards at 320 plus their gutters. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, alignItems: 'start', maxWidth: 1656, marginBottom: 14 }}>
           <SettingCard label="Logo">
             <div style={adminOnly}>
               <CompanyLogoPanel orgLogo={orgLogo} setOrgLogo={setOrgLogo} heading={false} canEdit={isAdmin !== false} />
@@ -745,6 +754,10 @@ export function SettingsModule({
                 </button>
               )}
             </div>
+            <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, marginTop: 8, lineHeight: 1.45 }}>
+              Give this to teammates so they can join <strong>{orgName}</strong> from "Join existing". Rotating it stops
+              the old one working immediately, which is the point of having one.
+            </div>
           </SettingCard>
 
           <SettingCard label="Joins as">
@@ -772,14 +785,15 @@ export function SettingsModule({
             )}
           </SettingCard>
 
-          {/* Places sits in Company because that is what it describes: the
-              rooms this company works in. It was a section of its own between
-              two lists about people, which is not where anybody looked for it. */}
+          {/* Places and Locations both sit in Company because that is what they
+              describe: the rooms this company works in. They are two cards, not
+              one, because they answer different questions — where the audience
+              sits, and where the gear lives — and the pickers that read them
+              never overlap. */}
           <SettingCard label="Places">
-            <div style={{ ...adminOnly, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={adminOnly}>
               <ChipEditor
-                label="Venues"
-                note="Offered when a production is added to the board."
+                note="Where you perform. Offered when a production is added to the board."
                 items={venues}
                 onRemove={removeVenue}
                 value={newVenue}
@@ -787,9 +801,13 @@ export function SettingsModule({
                 onAdd={addVenue}
                 placeholder="e.g. Courtyard Stage"
               />
+            </div>
+          </SettingCard>
+
+          <SettingCard label="Locations">
+            <div style={adminOnly}>
               <ChipEditor
-                label="Locations"
-                note="Where things are kept — inventory and set pieces pick from this."
+                note="Where things are kept. Inventory and set pieces pick from this."
                 items={locations}
                 onRemove={removeLocation}
                 value={newLocation}
@@ -801,17 +819,6 @@ export function SettingsModule({
           </SettingCard>
         </div>
 
-        <div className="td-body" style={{ fontSize: 12, color: COLOR.textFaint, marginBottom: 14, maxWidth: PROSE }}>
-          Give the code to teammates so they can join <strong>{orgName}</strong> from the "Join existing" option. Rotate it whenever you like — the old one stops working immediately, which is the point of having one.
-        </div>
-
-        <button
-          onClick={onSignOut}
-          className="td-focusable"
-          style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}
-        >
-          Sign out
-        </button>
       </div>
 
       {/* DEPARTMENTS — no longer inside a "Categories & taxonomies" wrapper.

@@ -671,6 +671,21 @@ export function positionNames(list) {
   return positionList(list).map((p) => p.name);
 }
 
+// ---------------------------------------------------------------------------
+// Alphabetical, the way a person reads a list.
+//
+// `numeric` so Reed 2 comes before Reed 10 rather than after it, and
+// sensitivity 'base' so casing and accents don't split a list into two
+// alphabets. Every sorted list in Settings goes through this, so they all
+// agree about where a name belongs.
+// ---------------------------------------------------------------------------
+export function byName(a, b) {
+  return String(a || '').localeCompare(String(b || ''), undefined, { numeric: true, sensitivity: 'base' });
+}
+export function sortKeysByLabel(map, keys) {
+  return [...(keys || [])].sort((a, b) => byName((map[a] || {}).label || a, (map[b] || {}).label || b));
+}
+
 // An order array filtered to the keys a derived map actually has, with anything
 // present in the map but missing from the order appended rather than dropped —
 // a department added by hand to the JSON still has to show up somewhere.
