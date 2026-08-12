@@ -71,6 +71,23 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
   const admins = (members || []).filter((m) => tierOf(m) === 'admin');
   const iAmAdmin = !!members && members.some((m) => m.user_id === me && tierOf(m) === 'admin');
 
+  // Three states worth telling apart, because they mean different things to an
+  // admin chasing somebody: signed in on a date, an account that exists and has
+  // never been used, and a database that has not had 20-members-last-login.sql
+  // run yet — where the honest answer is "we don't know", not "never".
+  const lastLoginOf = (m) => {
+    if (!('last_sign_in_at' in (m || {}))) {
+      return { label: '—', tone: 'unknown', note: 'Last login is not being reported yet. Run supabase/20-members-last-login.sql.' };
+    }
+    if (!m.last_sign_in_at) {
+      return { label: 'Never', tone: 'never', note: 'This account exists but has never been signed into. The invite may not have landed.' };
+    }
+    const when = new Date(m.last_sign_in_at);
+    const days = Math.floor((Date.now() - when.getTime()) / 86400000);
+    const ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+    return { label: when.toLocaleDateString(), tone: 'seen', note: `Last signed in ${ago}, at ${when.toLocaleString()}.` };
+  };
+
   // The roster person an account is linked to, if any.
   const personFor = (m) => (m.person_id ? ((roster || {})[m.person_kind] || []).find((p) => p.id === m.person_id) : null) || null;
 
@@ -253,15 +270,15 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
         // thing and the eye wants to read down a column — "who has not been
         // linked yet" is a glance, not a hunt through stacked cards.
         <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4, maxWidth: 1280 }}>
-          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 830, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Name', 'Position', 'Access', 'Email', 'Joined', 'Type', ''].map((h, i) => (
+                {['Name', 'Position', 'Access', 'Email', 'Joined', 'Last login', 'Type', ''].map((h, i) => (
                   <th
                     key={h || `a${i}`}
                     className="td-mono"
                     style={{
-                      textAlign: i === 6 ? 'right' : 'left',
+                      textAlign: i === 7 ? 'right' : 'left',
                       fontSize: 9.5,
                       fontWeight: 400,
                       color: COLOR.textFaint,
@@ -283,6 +300,7 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
                 const lastAdmin = tier === 'admin' && admins.length === 1;
                 const position = positionFor(m);
                 const access = accessFor(m);
+                const lastLogin = lastLoginOf(m);
                 const cell = {
                   padding: '9px 10px',
                   borderTop: rowIndex === 0 ? 'none' : `1px solid ${COLOR.line}`,
@@ -347,6 +365,16 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
                     <td style={{ ...cell, whiteSpace: 'nowrap' }}>
                       <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint }}>
                         {m.joined_at ? new Date(m.joined_at).toLocaleDateString() : '—'}
+                      </span>
+                    </td>
+
+                    <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                      <span
+                        className="td-mono"
+                        title={lastLogin.note}
+                        style={{ fontSize: 10.5, color: lastLogin.tone === 'never' ? COLOR.amberDim : COLOR.textFaint }}
+                      >
+                        {lastLogin.label}
                       </span>
                     </td>
 
