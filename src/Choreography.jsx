@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Footprints, Pencil, Plus, Video, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
-import { SCENE_TYPES, allScenes, assignmentFor, sceneById } from './shared.jsx';
+import { SCENE_TYPES, allScenes, assignmentsFor, sceneById } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // CHOREOGRAPHY — blocking notes, reference video, and click-to-place stage
@@ -107,7 +107,11 @@ export function ChoreographyEntryForm({ show, actors, initial, onSave, onCancel 
         const next = { ...p, [field]: value };
         if (field === 'personId' && value && !p.label) {
           const actor = actors.find((a) => a.id === value);
-          if (actor) next.label = `${actor.name} — ${actor.roleTitle}`;
+          // Multiple roles: put all of them in the auto-filled label so the
+          // director sees the actor is double-cast, then trims it down to
+          // whichever role applies to this marker. A single role fills in
+          // exactly as before.
+          if (actor) next.label = `${actor.name} — ${(actor.roles || [actor.roleTitle]).join(' / ')}`;
         }
         return next;
       })
@@ -240,7 +244,7 @@ export function ChoreographyEntryForm({ show, actors, initial, onSave, onCancel 
                 >
                   <option value="">— custom / ensemble —</option>
                   {actors.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name} — {a.roleTitle}</option>
+                    <option key={a.id} value={a.id}>{a.name} — {(a.roles || [a.roleTitle]).join(' / ')}</option>
                   ))}
                 </select>
                 <input
@@ -304,7 +308,7 @@ export function PositionKeyTable({ positions, actors }) {
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 10px', background: COLOR.panel, borderRadius: 3 }}>
               <span className="td-mono" style={{ fontSize: 11, color: COLOR.amber, width: 18, flexShrink: 0 }}>{i + 1}</span>
               <span className="td-body" style={{ fontSize: 12, color: COLOR.textPrimary, flex: 1 }}>{p.label || (actor ? actor.name : '—')}</span>
-              {actor && <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>{actor.roleTitle}</span>}
+              {actor && <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>{(actor.roles || [actor.roleTitle]).join(' / ')}</span>}
             </div>
           );
         })}
@@ -377,9 +381,17 @@ export function ChoreographyModule({ show, actors, setShows }) {
   const [editingId, setEditingId] = useState(null);
   const entries = show.choreography || [];
   const filtered = filter === 'all' ? entries : entries.filter((e) => sceneById(show, e.sceneId)?.type === filter);
+  // roleTitle stays the actor's first role, so nothing that only ever
+  // expected one role changes behavior. roles carries all of them, so a
+  // double-cast actor's second role is visible instead of silently dropped —
+  // in the picker label and in the auto-filled position label below, which
+  // the director can trim down to whichever role this marker is for.
   const showActors = actors
-    .filter((a) => assignmentFor(a, show.id))
-    .map((a) => ({ id: a.id, name: a.name, roleTitle: assignmentFor(a, show.id).roleTitle }));
+    .filter((a) => assignmentsFor(a, show.id).length > 0)
+    .map((a) => {
+      const roles = assignmentsFor(a, show.id).map((asn) => asn.roleTitle);
+      return { id: a.id, name: a.name, roleTitle: roles[0], roles };
+    });
   const hasScenes = allScenes(show).length > 0;
 
   function addEntry(entry) {

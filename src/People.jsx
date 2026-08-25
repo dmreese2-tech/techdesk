@@ -4,7 +4,7 @@ import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { actorsSpec, musiciansSpec, staffSpec } from './importSpecs.jsx';
-import { assignmentFor } from './shared.jsx';
+import { assignmentFor, assignmentsFor } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // PEOPLE — the shared roster module behind Actors, Musicians and Staff. Cast
@@ -73,6 +73,84 @@ export function AudioOptionsFields({ audioOptions, value, onChange }) {
   }
 
   return null;
+}
+// ---------------------------------------------------------------------------
+// ROLE ROWS — up to three {roleTitle, category} pairs on one person, for
+// actors playing more than one part in the same show (a swing, a double
+// cast, a small role stacked on a lead). Understudies don't need this: two
+// different people can already claim the same character with different
+// categories, which the grouped roster already handles.
+// ---------------------------------------------------------------------------
+const MAX_ROLE_ROWS = 3;
+function RoleRows({ rows, setRows, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, inputStyle, labelStyle }) {
+  function updateRow(i, field, value) {
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  }
+  function addRow() {
+    setRows((prev) => (prev.length >= MAX_ROLE_ROWS ? prev : [...prev, { roleTitle: '', category: categoryOrder[0] }]));
+  }
+  function removeRow(i) {
+    setRows((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
+  }
+
+  return (
+    <div>
+      {rows.map((row, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: rows.length > 1 ? '1.3fr 1fr auto' : '1.3fr 1fr', gap: 10, marginBottom: 8, alignItems: 'end' }}>
+          <div>
+            <label className="td-mono" style={labelStyle}>
+              {roleLabel}{rows.length > 1 ? ` — ROLE ${i + 1}` : ''}
+            </label>
+            {roleOptions ? (
+              <select className="td-focusable" style={inputStyle} value={row.roleTitle} onChange={(e) => updateRow(i, 'roleTitle', e.target.value)}>
+                <option value="">Choose...</option>
+                {roleOptions.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+                {row.roleTitle && !roleOptions.includes(row.roleTitle) && (
+                  <option value={row.roleTitle}>{row.roleTitle} (not in list)</option>
+                )}
+              </select>
+            ) : (
+              <input className="td-focusable" style={inputStyle} value={row.roleTitle} onChange={(e) => updateRow(i, 'roleTitle', e.target.value)} placeholder={rolePlaceholder} />
+            )}
+          </div>
+          <div>
+            <label className="td-mono" style={labelStyle}>CATEGORY</label>
+            <select className="td-focusable" style={inputStyle} value={row.category} onChange={(e) => updateRow(i, 'category', e.target.value)}>
+              {categoryOrder.map((c) => (
+                <option key={c} value={c}>{categoryMap[c]?.label || c}</option>
+              ))}
+              {row.category && !categoryOrder.includes(row.category) && (
+                <option value={row.category}>{row.category} (not a department)</option>
+              )}
+            </select>
+          </div>
+          {rows.length > 1 && (
+            <button
+              type="button"
+              onClick={() => removeRow(i)}
+              className="td-focusable"
+              aria-label={`Remove role ${i + 1}`}
+              style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', padding: '7px 2px' }}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+      {rows.length < MAX_ROLE_ROWS && (
+        <button
+          type="button"
+          onClick={addRow}
+          className="td-focusable"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: COLOR.amber, cursor: 'pointer', fontSize: 11, padding: '2px 0', marginBottom: 4 }}
+        >
+          <Plus size={12} /> Add another role
+        </button>
+      )}
+    </div>
+  );
 }
 export function PeopleSignIn({ personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions, show, people, setPeople, currentUserId, setCurrentUserId }) {
   const currentUser = people.find((p) => p.id === currentUserId);
@@ -252,18 +330,24 @@ export function PeopleSignIn({ personLabel, roleLabel, rolePlaceholder, roleOpti
 // ---------------------------------------------------------------------------
 // PEOPLE ROSTER ROW + GROUPED LIST
 // ---------------------------------------------------------------------------
-export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople }) {
+export function PeopleRosterRow({ person, assignment: assignmentProp, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople }) {
   const [editing, setEditing] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const assignment = show ? assignmentFor(person, show.id) : null;
+  // All of this person's roles on this show. A caller inside the grouped
+  // view passes the one specific assignment this row is standing in for
+  // (so a double-cast actor's two rows each show their own role); a caller
+  // outside a group context (rest-of-company list) leaves it unset and gets
+  // the first one, same as before.
+  const allAssignments = show ? assignmentsFor(person, show.id) : [];
+  const assignment = assignmentProp !== undefined ? assignmentProp : (allAssignments[0] || null);
   const history = show ? (person.assignments || []).filter((a) => a.showId !== show.id) : (person.assignments || []);
+  const rolesOrBlank = () => (allAssignments.length ? allAssignments.map((a) => ({ roleTitle: a.roleTitle, category: a.category })) : [{ roleTitle: '', category: categoryOrder[0] }]);
   const [draft, setDraft] = useState({
     name: person.name,
     phone: person.phone || '',
     email: person.email || '',
-    roleTitle: assignment?.roleTitle || '',
-    category: assignment?.category || categoryOrder[0],
+    roleRows: rolesOrBlank(),
     miced: assignment?.miced || false,
     micType: assignment?.micType || '',
     electric: assignment?.electric || false,
@@ -287,8 +371,7 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
       name: person.name,
       phone: person.phone || '',
       email: person.email || '',
-      roleTitle: assignment?.roleTitle || '',
-      category: assignment?.category || categoryOrder[0],
+      roleRows: rolesOrBlank(),
       miced: assignment?.miced || false,
       micType: assignment?.micType || '',
       electric: assignment?.electric || false,
@@ -322,17 +405,24 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
         const contact = { name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim() };
         if (!show) return { ...p, ...contact };
         const others = (p.assignments || []).filter((a) => a.showId !== show.id);
-        const newAssignment = {
-          id: assignment?.id || `asn-${p.id}-${show.id}`,
-          showId: show.id,
-          roleTitle: draft.roleTitle.trim(),
-          category: draft.category,
-          miced: draft.miced,
-          micType: draft.micType,
-          electric: draft.electric,
-          monitorMix: draft.monitorMix,
-        };
-        return { ...p, ...contact, assignments: [...others, newAssignment] };
+        const existingForShow = assignmentsFor(p, show.id);
+        // Audio fields (mic'd, electric, monitor mix) are asked once per
+        // person, not once per role, and are copied onto every assignment so
+        // any consumer that reads the first match still sees them correctly
+        // regardless of which of the person's roles it happens to find.
+        const newAssignments = draft.roleRows
+          .filter((r) => r.roleTitle.trim())
+          .map((r, i) => ({
+            id: existingForShow[i]?.id || `asn-${p.id}-${show.id}-${i}`,
+            showId: show.id,
+            roleTitle: r.roleTitle.trim(),
+            category: r.category,
+            miced: draft.miced,
+            micType: draft.micType,
+            electric: draft.electric,
+            monitorMix: draft.monitorMix,
+          }));
+        return { ...p, ...contact, assignments: [...others, ...newAssignments] };
       })
     );
     setEditing(false);
@@ -346,46 +436,22 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
             {roleLabel} & CATEGORY ARE SPECIFIC TO {show.title.toUpperCase()}
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: show ? '1.2fr 1.2fr 1fr' : '1fr', gap: 8, marginBottom: 8 }}>
-          <div>
-            <label className="td-mono" style={labelStyle}>NAME</label>
-            <input className="td-focusable" style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-          </div>
-          {show && (
-            <>
-              <div>
-                <label className="td-mono" style={labelStyle}>{roleLabel}</label>
-                {roleOptions ? (
-                  <select className="td-focusable" style={inputStyle} value={draft.roleTitle} onChange={(e) => setDraft({ ...draft, roleTitle: e.target.value })}>
-                    <option value="">Choose...</option>
-                    {roleOptions.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                    {draft.roleTitle && !roleOptions.includes(draft.roleTitle) && (
-                      <option value={draft.roleTitle}>{draft.roleTitle} (not in list)</option>
-                    )}
-                  </select>
-                ) : (
-                  <input className="td-focusable" style={inputStyle} value={draft.roleTitle} onChange={(e) => setDraft({ ...draft, roleTitle: e.target.value })} />
-                )}
-              </div>
-              <div>
-                <label className="td-mono" style={labelStyle}>CATEGORY</label>
-                <select className="td-focusable" style={inputStyle} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
-                  {categoryOrder.map((c) => (
-                    <option key={c} value={c}>{categoryMap[c]?.label || c}</option>
-                  ))}
-                  {/* Their current department, if it isn't one any more. Without
-                      it the select shows blank and saving quietly re-files them
-                      under whatever happens to be first. */}
-                  {draft.category && !categoryOrder.includes(draft.category) && (
-                    <option value={draft.category}>{draft.category} (not a department)</option>
-                  )}
-                </select>
-              </div>
-            </>
-          )}
+        <div style={{ marginBottom: 8, maxWidth: show ? 320 : undefined }}>
+          <label className="td-mono" style={labelStyle}>NAME</label>
+          <input className="td-focusable" style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
         </div>
+        {show && (
+          <RoleRows
+            rows={draft.roleRows}
+            setRows={(updater) => setDraft((d) => ({ ...d, roleRows: typeof updater === 'function' ? updater(d.roleRows) : updater }))}
+            roleLabel={roleLabel}
+            roleOptions={roleOptions}
+            categoryMap={categoryMap}
+            categoryOrder={categoryOrder}
+            inputStyle={inputStyle}
+            labelStyle={labelStyle}
+          />
+        )}
 
         {/* Contact details. The email is not decoration: it is what the claim
             flow matches on when this person signs in, and without it their
@@ -427,7 +493,7 @@ export function PeopleRosterRow({ person, show, shows, categoryMap, categoryOrde
         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
           <button
             onClick={save}
-            disabled={!draft.name.trim() || (!!show && !draft.roleTitle.trim())}
+            disabled={!draft.name.trim() || (!!show && !draft.roleRows.some((r) => r.roleTitle.trim()))}
             className="td-focusable"
             style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '6px 14px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
           >
@@ -598,14 +664,18 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
   const onShow = show ? people.filter((p) => assignmentFor(p, show.id)) : [];
   const notOnShow = show ? people.filter((p) => !assignmentFor(p, show.id)) : people;
 
+  // Grouped by assignment, not by person: someone playing a Lead and a
+  // Featured role in the same show has two assignments and shows up once in
+  // each group, the same way the LEAD / FEATURED counts read on a program.
   const grouped = useMemo(() => {
     if (!show) return {};
     const g = {};
     categoryOrder.forEach((c) => (g[c] = []));
     onShow.forEach((p) => {
-      const a = assignmentFor(p, show.id);
-      if (!g[a.category]) g[a.category] = [];
-      g[a.category].push(p);
+      assignmentsFor(p, show.id).forEach((a) => {
+        if (!g[a.category]) g[a.category] = [];
+        g[a.category].push({ person: p, assignment: a });
+      });
     });
     return g;
   }, [onShow, show, categoryOrder]);
@@ -635,8 +705,8 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
                   </span>
                 </div>
                 <div>
-                  {grouped[c].map((p) => (
-                    <PeopleRosterRow key={p.id} person={p} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
+                  {grouped[c].map(({ person: p, assignment: a }) => (
+                    <PeopleRosterRow key={a.id} person={p} assignment={a} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
                   ))}
                 </div>
               </div>
@@ -674,9 +744,9 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [roleTitle, setRoleTitle] = useState('');
-  const [category, setCategory] = useState(categoryOrder[0]);
+  const [roleRows, setRoleRows] = useState([{ roleTitle: '', category: categoryOrder[0] }]);
   const [audioFields, setAudioFields] = useState({ miced: false, micType: '', electric: false, monitorMix: false });
+  const hasRole = roleRows.some((r) => r.roleTitle.trim());
 
   const inputStyle = {
     background: COLOR.void,
@@ -699,37 +769,25 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
           <X size={16} />
         </button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: show ? '1.4fr 1.4fr 1fr' : '1fr', gap: 12 }}>
-        <div>
-          <label className="td-mono" style={labelStyle}>NAME</label>
-          <input className="td-focusable" style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
-        </div>
-        {show && (
-          <>
-            <div>
-              <label className="td-mono" style={labelStyle}>{roleLabel} (THIS SHOW)</label>
-              {roleOptions ? (
-                <select className="td-focusable" style={inputStyle} value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)}>
-                  <option value="">Choose...</option>
-                  {roleOptions.map((o) => (
-                    <option key={o} value={o}>{o}</option>
-                  ))}
-                </select>
-              ) : (
-                <input className="td-focusable" style={inputStyle} value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} placeholder={rolePlaceholder} />
-              )}
-            </div>
-            <div>
-              <label className="td-mono" style={labelStyle}>CATEGORY</label>
-              <select className="td-focusable" style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
-                {categoryOrder.map((c) => (
-                  <option key={c} value={c}>{categoryMap[c]?.label || c}</option>
-                ))}
-              </select>
-            </div>
-          </>
-        )}
+      <div style={{ marginBottom: show ? 4 : 0 }}>
+        <label className="td-mono" style={labelStyle}>NAME</label>
+        <input className="td-focusable" style={{ ...inputStyle, maxWidth: show ? 320 : undefined }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
       </div>
+      {show && (
+        <div style={{ marginTop: 12 }}>
+          <RoleRows
+            rows={roleRows}
+            setRows={setRoleRows}
+            roleLabel={`${roleLabel} (THIS SHOW)`}
+            rolePlaceholder={rolePlaceholder}
+            roleOptions={roleOptions}
+            categoryMap={categoryMap}
+            categoryOrder={categoryOrder}
+            inputStyle={inputStyle}
+            labelStyle={labelStyle}
+          />
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
         <div>
@@ -752,28 +810,29 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
 
       <button
         className="td-focusable"
-        disabled={!name.trim() || (!!show && !roleTitle.trim())}
+        disabled={!name.trim() || (!!show && !hasRole)}
         onClick={() =>
           onAdd({
             name: name.trim(),
             phone: phone.trim(),
             email: email.trim(),
-            roleTitle: roleTitle.trim(),
-            category,
+            roles: roleRows
+              .filter((r) => r.roleTitle.trim())
+              .map((r) => ({ roleTitle: r.roleTitle.trim(), category: r.category })),
             ...audioFields,
           })
         }
         style={{
           marginTop: 14,
-          background: name.trim() && (!show || roleTitle.trim()) ? COLOR.amber : COLOR.slateDim,
-          color: name.trim() && (!show || roleTitle.trim()) ? COLOR.void : COLOR.textFaint,
+          background: name.trim() && (!show || hasRole) ? COLOR.amber : COLOR.slateDim,
+          color: name.trim() && (!show || hasRole) ? COLOR.void : COLOR.textFaint,
           border: 'none',
           borderRadius: 3,
           padding: '9px 16px',
           fontSize: 12,
           fontWeight: 600,
           letterSpacing: '0.03em',
-          cursor: name.trim() && (!show || roleTitle.trim()) ? 'pointer' : 'not-allowed',
+          cursor: name.trim() && (!show || hasRole) ? 'pointer' : 'not-allowed',
         }}
       >
         Add to roster
@@ -787,16 +846,22 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
 export function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurrentUserId, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions, importSpec }) {
   const [showForm, setShowForm] = useState(false);
 
-  function handleManualAdd({ name, phone, email, roleTitle, category, ...audioFields }) {
+  function handleManualAdd({ name, phone, email, roles, ...audioFields }) {
     const existing = people.find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (show) {
+      const personId = existing ? existing.id : `p${Date.now()}`;
+      // Same audio fields on every role — see the note in PeopleRosterRow.save.
+      const newAssignments = (roles || []).map((r, i) => ({
+        id: `asn-${personId}-${show.id}-${i}`,
+        showId: show.id,
+        roleTitle: r.roleTitle,
+        category: r.category,
+        ...audioFields,
+      }));
       if (existing) {
-        const newAssignment = { id: `asn-${existing.id}-${show.id}`, showId: show.id, roleTitle, category, ...audioFields };
-        setPeople((prev) => prev.map((p) => (p.id === existing.id ? { ...p, phone: phone || p.phone, email: email || p.email, assignments: [...(p.assignments || []).filter((a) => a.showId !== show.id), newAssignment] } : p)));
+        setPeople((prev) => prev.map((p) => (p.id === existing.id ? { ...p, phone: phone || p.phone, email: email || p.email, assignments: [...(p.assignments || []).filter((a) => a.showId !== show.id), ...newAssignments] } : p)));
       } else {
-        const newId = `p${Date.now()}`;
-        const newAssignment = { id: `asn-${newId}-${show.id}`, showId: show.id, roleTitle, category, ...audioFields };
-        setPeople((prev) => [...prev, { id: newId, name, phone, email, assignments: [newAssignment] }]);
+        setPeople((prev) => [...prev, { id: personId, name, phone, email, assignments: newAssignments }]);
       }
     } else if (!existing) {
       const newId = `p${Date.now()}`;
@@ -824,13 +889,13 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
           filename={`${show ? show.title : 'company'}-${personLabel}`}
           rows={() =>
             people.map((p) => {
-              const a = show ? assignmentFor(p, show.id) : null;
+              const asns = show ? assignmentsFor(p, show.id) : [];
               return {
                 Name: p.name,
-                'On this show': a ? 'yes' : 'no',
-                Role: a ? a.roleTitle || '' : '',
-                Category: a ? (categoryMap[a.category] || {}).label || a.category || '' : '',
-                Mic: a ? a.micChannel || '' : '',
+                'On this show': asns.length ? 'yes' : 'no',
+                Role: asns.map((a) => a.roleTitle || '').filter(Boolean).join('; '),
+                Category: asns.map((a) => (categoryMap[a.category] || {}).label || a.category || '').filter(Boolean).join('; '),
+                Mic: (asns.find((a) => a.micChannel) || {}).micChannel || '',
                 Phone: p.phone || '',
                 Email: p.email || '',
               };

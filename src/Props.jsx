@@ -5,7 +5,7 @@ import { ReferenceImages } from './ReferenceImages.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { propsSpec } from './importSpecs.jsx';
-import { PROP_SOURCES, PROP_SOURCE_ORDER, allScenes, assignmentFor, sceneLabel } from './shared.jsx';
+import { PROP_SOURCES, PROP_SOURCE_ORDER, allScenes, assignmentsFor, sceneLabel } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // PROPS — every hand prop and set dressing, against the scene it appears in and
@@ -121,7 +121,7 @@ export function PropForm({ show, showActors, inventory, locations, characters, i
           <select className="td-focusable" style={inputStyle} value={actorId} onChange={(e) => setActorId(e.target.value)}>
             <option value="">— Set prop, no one specific —</option>
             {showActors.map((a) => (
-              <option key={a.id} value={a.id}>{a.name} — {a.roleTitle}</option>
+              <option key={`${a.id}::${a.roleTitle}`} value={a.id}>{a.name} — {a.roleTitle}</option>
             ))}
           </select>
         </div>
@@ -288,9 +288,12 @@ export function PropsModule({ show, actors, inventory, locations, setShows, char
   const [editingId, setEditingId] = useState(null);
   const props_ = show.props || [];
 
-  const showActors = actors
-    .filter((a) => assignmentFor(a, show.id))
-    .map((a) => ({ id: a.id, name: a.name, roleTitle: assignmentFor(a, show.id).roleTitle }));
+  // Same reasoning as Costumes: one entry per role so the "jump to whoever is
+  // cast" lookup by character name can find a double-cast actor by either
+  // role. actorId storage is untouched — id here is still the actor's id.
+  const showActors = actors.flatMap((a) =>
+    assignmentsFor(a, show.id).map((asn) => ({ id: a.id, name: a.name, roleTitle: asn.roleTitle }))
+  );
 
   const filtered = props_
     .filter((p) => (filter === 'all' ? true : filter === 'acquired' ? p.acquired : !p.acquired))

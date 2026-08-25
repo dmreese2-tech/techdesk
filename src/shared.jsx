@@ -788,6 +788,15 @@ export function assignmentFor(person, showId) {
   return (person.assignments || []).find((a) => a.showId === showId) || null;
 }
 
+// Same lookup, but every assignment for that show rather than the first —
+// an actor double-cast across two roles has more than one. Existing callers
+// that only ever expected one assignment per person per show (Choreography,
+// Costumes, Props, Calls) keep using assignmentFor unchanged; this is for
+// the roster UI, which now needs to see and edit all of them at once.
+export function assignmentsFor(person, showId) {
+  return (person.assignments || []).filter((a) => a.showId === showId);
+}
+
 // Person-type metadata for call slots — a slot can be filled from any of
 // the four rosters, not just Crew.
 export const PERSON_TYPES = {

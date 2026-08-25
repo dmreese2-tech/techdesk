@@ -5,7 +5,7 @@ import { ReferenceImages } from './ReferenceImages.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { costumesSpec } from './importSpecs.jsx';
-import { COSTUME_SOURCES, COSTUME_SOURCE_ORDER, assignmentFor, sceneLabel } from './shared.jsx';
+import { COSTUME_SOURCES, COSTUME_SOURCE_ORDER, assignmentsFor, sceneLabel } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
 // COSTUMES — what each character wears in each scene, tracked from needs-to-buy
@@ -102,7 +102,7 @@ export function CostumeForm({ show, showActors, inventory, locations, characters
           <select className="td-focusable" style={inputStyle} value={actorId} onChange={(e) => setActorId(e.target.value)}>
             <option value="">{showActors.length ? 'Nobody cast yet' : 'No cast on this show yet'}</option>
             {showActors.map((a) => (
-              <option key={a.id} value={a.id}>{a.name} — {a.roleTitle}</option>
+              <option key={`${a.id}::${a.roleTitle}`} value={a.id}>{a.name} — {a.roleTitle}</option>
             ))}
           </select>
         </div>
@@ -270,9 +270,14 @@ export function CostumesModule({ show, actors, inventory, locations, setShows, c
   const [editingId, setEditingId] = useState(null);
   const costumes = show.costumes || [];
 
-  const showActors = actors
-    .filter((a) => assignmentFor(a, show.id))
-    .map((a) => ({ id: a.id, name: a.name, roleTitle: assignmentFor(a, show.id).roleTitle }));
+  // One entry per role, not per actor — a double-cast actor is findable by
+  // either character name (the "jump to whoever is cast" lookup below
+  // searches roleTitle) instead of only their first-assigned role. id stays
+  // the actor's own id, so costume.actorId still just names the person; two
+  // entries can share the same id here on purpose.
+  const showActors = actors.flatMap((a) =>
+    assignmentsFor(a, show.id).map((asn) => ({ id: a.id, name: a.name, roleTitle: asn.roleTitle }))
+  );
 
   const filtered = filter === 'all' ? costumes : filter === 'acquired' ? costumes.filter((c) => c.acquired) : costumes.filter((c) => !c.acquired);
 
