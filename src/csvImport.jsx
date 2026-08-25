@@ -166,6 +166,43 @@ export const num = (v, fallback = 0) => {
 };
 export const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+// Excel silently reformats a Date column to the locale's short date on save,
+// so an exported-then-reopened-then-reimported template often isn't ISO
+// anymore. The schedule calendar matches dates by exact string equality
+// against zero-padded YYYY-MM-DD, so anything else is a silent no-show, not
+// an error. Recognize what people actually produce and normalize; fall back
+// to the raw string when nothing matches, so unrecognized input still behaves
+// exactly as it did before this existed.
+export const parseDateLoose = (v) => {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); // ISO
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); // M/D/YYYY or M-D-YYYY
+  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  return s;
+};
+
+// Same trouble, for Time: Excel's default time format is 12h ("9:00 AM"),
+// while every display helper (formatTime12h, addMinutesToTime) assumes
+// zero-padded 24h "HH:MM". Accept either and normalize; unrecognized input
+// passes through unchanged.
+export const parseTimeLoose = (v) => {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  let m = s.match(/^(\d{1,2}):(\d{2})$/); // already 24h
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i); // 12h
+  if (m) {
+    let h = parseInt(m[1], 10);
+    const period = m[3].toUpperCase();
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m[2]}`;
+  }
+  return s;
+};
+
 // Matching a name to something already in the app — a scene, an actor, a
 // character. Case and spacing vary; intent doesn't.
 export const byName = (list, name, fields = ['name']) => {

@@ -1,4 +1,4 @@
-import { yes, num, uid, byName } from './csvImport.jsx';
+import { yes, num, uid, byName, parseDateLoose, parseTimeLoose } from './csvImport.jsx';
 import { allScenes } from './shared.jsx';
 
 // ---------------------------------------------------------------------------
@@ -30,8 +30,8 @@ export const scheduleSpec = {
   build: (r) => ({
     id: uid('sch'),
     label: r.get('Label'),
-    date: r.get('Date'),
-    time: r.get('Time') || '09:00',
+    date: parseDateLoose(r.get('Date')),
+    time: parseTimeLoose(r.get('Time')) || '09:00',
     durationMinutes: num(r.get('Minutes'), 120),
     location: r.get('Location') || '',
     notes: r.get('Notes') || '',
@@ -234,7 +234,7 @@ export const inventorySpec = {
       totalQty: qty,
       location: r.get('Location') || '',
       costPerUnit: num(r.get('Cost per unit')),
-      purchaseDate: r.get('Purchase date') || null,
+      purchaseDate: parseDateLoose(r.get('Purchase date')) || null,
       purchaseSource: r.get('Source') || '',
       purchaseNotes: r.get('Notes') || '',
       // Every unit starts good. Damage is recorded as it happens, not imported.
