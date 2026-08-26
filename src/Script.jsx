@@ -41,6 +41,129 @@ export const SCRIPT_TYPES = [
   { key: 'rehearsal', label: 'Rehearsal draft' },
 ];
 
+// ---------------------------------------------------------------------------
+// CHOREOGRAPHY INSERTS — a whole extra page, not a marker on an existing one.
+// Stored per script version as `inserts`, alongside `markers`. Each insert
+// says which page it follows (`afterPage`) and which blocking diagram it
+// shows; the export step is what turns "follows page 42" into an actual
+// physical page 43, which is all duplex printing needs to land it on the
+// back of page 42.
+// ---------------------------------------------------------------------------
+
+// Greedy word wrap against pdf-lib's own font metrics, so the blocking-notes
+// block never overruns its column width on paper.
+function wrapPdfText(text, font, size, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const trial = line ? `${line} ${word}` : word;
+    if (line && font.widthOfTextAtSize(trial, size) > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = trial;
+    }
+  });
+  if (line) lines.push(line);
+  return lines;
+}
+
+// Draws one inserted page: the blocking diagram (capped under half the page,
+// per the SM's spec), the choreography entry's own Blocking Notes text below
+// it, then ruled lines for handwritten notes filling the rest.
+function drawChoreoInsertPage(page, insert, entry, diagram, boldFont, bodyFont) {
+  const { width, height } = page.getSize();
+  const margin = 40;
+  const dark = rgb(0.1, 0.12, 0.14);
+  const faint = rgb(0.5, 0.5, 0.5);
+  const amber = rgb(0.91, 0.64, 0.24);
+  const rule = rgb(0.8, 0.8, 0.8);
+
+  let cursorY = height - margin;
+
+  page.drawText(`CHOREOGRAPHY INSERT \u00b7 Ref ${insert.refLabel}`, { x: margin, y: cursorY, size: 12, font: boldFont, color: dark });
+  cursorY -= 16;
+  const entryLabel = entry ? (entry.name || 'Untitled number') : 'Unlinked entry';
+  const diagramLabel = diagram ? diagram.label : '';
+  page.drawText(
+    `Follows script p.${insert.afterPage} \u00b7 ${entryLabel}${diagramLabel ? ' \u2014 ' + diagramLabel : ''}`,
+    { x: margin, y: cursorY, size: 9.5, font: bodyFont, color: faint }
+  );
+  cursorY -= 20;
+
+  // Diagram zone — hard-capped at 46% of page height, safely under half.
+  const zoneTop = cursorY;
+  const zoneHeight = height * 0.46;
+  const zoneBottom = zoneTop - zoneHeight;
+  const availW = width - margin * 2;
+  let boxW = Math.min(availW * 0.6, zoneHeight * 1.5);
+  let boxH = boxW / 1.5;
+  if (boxH > zoneHeight) {
+    boxH = zoneHeight;
+    boxW = boxH * 1.5;
+  }
+  const boxX = margin;
+  const boxY = zoneBottom + (zoneHeight - boxH) / 2;
+
+  page.drawRectangle({ x: boxX, y: boxY, width: boxW, height: boxH, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 1 });
+  const thirdY1 = boxY + (boxH * 2) / 3;
+  const thirdY2 = boxY + boxH / 3;
+  const thirdX1 = boxX + boxW / 3;
+  const thirdX2 = boxX + (boxW * 2) / 3;
+  [thirdY1, thirdY2].forEach((y) => page.drawLine({ start: { x: boxX, y }, end: { x: boxX + boxW, y }, thickness: 0.5, color: rule, dashArray: [3, 3] }));
+  [thirdX1, thirdX2].forEach((x) => page.drawLine({ start: { x, y: boxY }, end: { x, y: boxY + boxH }, thickness: 0.5, color: rule, dashArray: [3, 3] }));
+  page.drawText('UPSTAGE', { x: boxX + boxW / 2 - 18, y: boxY + boxH - 10, size: 6.5, font: bodyFont, color: faint });
+  page.drawText('DOWNSTAGE / AUDIENCE', { x: boxX + boxW / 2 - 42, y: boxY + 4, size: 6.5, font: bodyFont, color: faint });
+
+  const markers = (diagram && diagram.markers) || [];
+  markers.forEach((m, i) => {
+    // Marker y is 0 at upstage (top on screen) / 100 at downstage (bottom on
+    // screen); pdf-lib's y-axis runs bottom-up, so it flips against boxY+boxH.
+    const mx = boxX + (m.x / 100) * boxW;
+    const my = boxY + boxH - (m.y / 100) * boxH;
+    page.drawCircle({ x: mx, y: my, size: 7, color: amber, borderColor: dark, borderWidth: 0.5 });
+    const label = String(i + 1);
+    page.drawText(label, { x: mx - (label.length > 1 ? 4.5 : 2.5), y: my - 3, size: 8, font: boldFont, color: dark });
+  });
+
+  // Position key, same numbering convention as the on-screen StageDiagram —
+  // marker i pairs with positions[i], matching how the app already shows it.
+  const keyX = boxX + boxW + 18;
+  let keyY = boxY + boxH - 2;
+  if (keyX < width - margin - 40) {
+    page.drawText('POSITION KEY', { x: keyX, y: keyY, size: 8, font: boldFont, color: faint });
+    keyY -= 12;
+    (entry?.positions || []).forEach((p, i) => {
+      if (keyY < zoneBottom) return;
+      page.drawText(`${i + 1}. ${p.label || '\u2014'}`, { x: keyX, y: keyY, size: 8, font: bodyFont, color: dark });
+      keyY -= 11;
+    });
+  }
+
+  cursorY = zoneBottom - 16;
+
+  // Blocking Notes — the entry's own notes field, printed as text.
+  page.drawText('BLOCKING NOTES', { x: margin, y: cursorY, size: 8.5, font: boldFont, color: faint });
+  cursorY -= 13;
+  const wrapped = wrapPdfText(entry?.notes || '\u2014', bodyFont, 9, width - margin * 2);
+  const notesLineCount = Math.min(wrapped.length, 6);
+  wrapped.slice(0, notesLineCount).forEach((line) => {
+    page.drawText(line, { x: margin, y: cursorY, size: 9, font: bodyFont, color: dark });
+    cursorY -= 12;
+  });
+
+  cursorY -= 10;
+
+  // Written notes — blank ruled lines for the SM, filling the rest of the page.
+  page.drawText('NOTES', { x: margin, y: cursorY, size: 8.5, font: boldFont, color: faint });
+  cursorY -= 16;
+  while (cursorY > margin) {
+    page.drawLine({ start: { x: margin, y: cursorY }, end: { x: width - margin, y: cursorY }, thickness: 0.5, color: rule });
+    cursorY -= 20;
+  }
+}
+
 export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canEdit = true }) {
   const versions = show.scriptVersions || [];
 
@@ -81,6 +204,10 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
   const [adding, setAdding] = useState(false);
   const [newType, setNewType] = useState('cues');
   const [newLabel, setNewLabel] = useState('');
+  // Which choreography entry's "Insert page" picker is open, and which of
+  // its formations are checked, so several can go in as one action.
+  const [insertPickerFor, setInsertPickerFor] = useState(null);
+  const [insertSelection, setInsertSelection] = useState([]);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -314,6 +441,64 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
     );
   }
 
+  function openInsertPicker(choreoId) {
+    setInsertPickerFor((cur) => (cur === choreoId ? null : choreoId));
+    setInsertSelection([]);
+  }
+  function toggleInsertSelection(diagramId) {
+    setInsertSelection((prev) => (prev.includes(diagramId) ? prev.filter((id) => id !== diagramId) : [...prev, diagramId]));
+  }
+  function confirmInserts(choreoId) {
+    if (insertSelection.length === 0) {
+      setInsertPickerFor(null);
+      return;
+    }
+    setShows((prev) =>
+      prev.map((s) => {
+        if (s.id !== show.id) return s;
+        return {
+          ...s,
+          scriptVersions: (s.scriptVersions || []).map((v) => {
+            if (v.id !== script.id) return v;
+            // One insert per checked formation, labelled in the order they
+            // were selected so a batch of three reads 42A/42B/42C. Picks the
+            // lowest unused letter on this page rather than counting
+            // survivors, so removing 12B and adding a new one can't produce
+            // a second 12C.
+            const usedLetters = new Set(
+              (v.inserts || [])
+                .filter((i) => i.afterPage === pageNum)
+                .map((i) => i.refLabel.slice(String(pageNum).length))
+            );
+            let letterCode = 65;
+            const created = insertSelection.map((diagramId) => {
+              while (usedLetters.has(String.fromCharCode(letterCode))) letterCode += 1;
+              const letter = String.fromCharCode(letterCode);
+              usedLetters.add(letter);
+              const refLabel = `${pageNum}${letter}`;
+              return {
+                id: `ins-${Date.now()}-${diagramId}`,
+                afterPage: pageNum,
+                choreoId,
+                diagramId,
+                refLabel,
+                createdAt: new Date().toISOString(),
+              };
+            });
+            return { ...v, inserts: [...(v.inserts || []), ...created] };
+          }),
+        };
+      })
+    );
+    setInsertPickerFor(null);
+    setInsertSelection([]);
+  }
+  function removeInsert(insertId) {
+    setShows((prev) =>
+      prev.map((s) => (s.id === show.id ? { ...s, scriptVersions: (s.scriptVersions || []).map((v) => (v.id === script.id ? { ...v, inserts: (v.inserts || []).filter((i) => i.id !== insertId) } : v)) } : s))
+    );
+  }
+
   async function handleExport() {
     if (!script) return;
     setExporting(true);
@@ -362,6 +547,26 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
         page.drawCircle({ x, y, size: 9, color, opacity: 0.85 });
         page.drawText(label, { x: x + 12, y: y - 4, size: 10, font, color });
       });
+
+      // Choreography inserts — physically interleaved pages, not marks on an
+      // existing one. Sorted by the page they follow so a duplex print run
+      // puts each on the back of the right sheet; a running offset accounts
+      // for earlier insertions pushing everything after them down by one.
+      const inserts = [...(script.inserts || [])].sort((a, b) => a.afterPage - b.afterPage);
+      if (inserts.length > 0) {
+        const bodyFont = await outDoc.embedFont(StandardFonts.Helvetica);
+        const anchorSize = pages[0] ? pages[0].getSize() : { width: 612, height: 792 };
+        let offset = 0;
+        inserts.forEach((ins) => {
+          const entry = choreo.find((c) => c.id === ins.choreoId);
+          const diagram = entry?.diagrams?.find((d) => d.id === ins.diagramId);
+          const targetIndex = ins.afterPage + offset;
+          const insertedPage = outDoc.insertPage(targetIndex, [anchorSize.width, anchorSize.height]);
+          drawChoreoInsertPage(insertedPage, ins, entry, diagram, font, bodyFont);
+          offset += 1;
+        });
+      }
+
       const outBytes = await outDoc.save();
       const blob = new Blob([outBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -546,6 +751,7 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
   }
 
   const markersOnPage = (script.markers || []).filter((m) => m.page === pageNum);
+  const insertsOnPage = (script.inserts || []).filter((i) => i.afterPage === pageNum);
 
   return (
     <div>
@@ -712,6 +918,30 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
             );
           })}
         </div>
+
+        {insertsOnPage.length > 0 && (
+          <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(199,125,191,0.08)', border: '1px solid #C77DBF', borderRadius: 4 }}>
+            <div className="td-mono" style={{ fontSize: 10, color: '#C77DBF', letterSpacing: '0.05em', marginBottom: 6 }}>
+              INSERT PAGE{insertsOnPage.length === 1 ? '' : 'S'} FOLLOWING THIS PAGE
+            </div>
+            {insertsOnPage.map((ins) => {
+              const entry = choreo.find((c) => c.id === ins.choreoId);
+              const diagram = entry?.diagrams?.find((d) => d.id === ins.diagramId);
+              return (
+                <div key={ins.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: COLOR.textMuted, padding: '3px 0' }}>
+                  <span>
+                    <strong style={{ color: '#C77DBF' }}>{ins.refLabel}</strong>{' '}
+                    {entry ? (entry.name || 'Untitled number') : 'Unlinked entry'}
+                    {diagram ? ` \u2014 ${diagram.label}` : ''}
+                  </span>
+                  <button onClick={() => removeInsert(ins.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 10, cursor: 'pointer', textDecoration: 'underline' }}>
+                    remove
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div style={{ flex: '0 0 260px', minWidth: 220 }}>
@@ -772,7 +1002,8 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
             {choreo.map((n) => {
               const marker = (script.markers || []).find((m) => m.choreoId === n.id);
               return (
-                <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
+                <div key={n.id} style={{ background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: '7px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name || 'Untitled number'}</div>
                     {n.notes && <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.notes}</div>}
@@ -791,6 +1022,71 @@ export function ScriptModule({ show, orgId, cueSheets, setShows, CUE_DEPTS, canE
                       <Footprints size={11} /> Place
                     </button>
                   )}
+                  </div>
+                  {(() => {
+                    const hasDiagrams = (n.diagrams || []).length > 0;
+                    const ownInserts = (script.inserts || []).filter((i) => i.choreoId === n.id);
+                    return (
+                      <div style={{ marginTop: 2 }}>
+                        {ownInserts.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 }}>
+                            {ownInserts.map((ins) => (
+                              <div key={ins.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: COLOR.textFaint }}>
+                                <button onClick={() => setPageNum(ins.afterPage)} className="td-focusable" style={{ background: 'none', border: 'none', color: '#C77DBF', fontSize: 10, cursor: 'pointer' }}>
+                                  Insert {ins.refLabel}
+                                </button>
+                                <button onClick={() => removeInsert(ins.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 9.5, cursor: 'pointer', textDecoration: 'underline' }}>remove</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          onClick={() => (hasDiagrams ? openInsertPicker(n.id) : null)}
+                          disabled={!hasDiagrams}
+                          title={hasDiagrams ? `Insert a page after p.${pageNum} showing blocking for this number` : 'Add a formation diagram on the Choreography page first'}
+                          className="td-focusable"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            background: 'transparent',
+                            color: hasDiagrams ? COLOR.textMuted : COLOR.slateDim,
+                            border: `1px dashed ${hasDiagrams ? COLOR.line : COLOR.slateDim}`,
+                            borderRadius: 3,
+                            padding: '4px 9px',
+                            fontSize: 10,
+                            cursor: hasDiagrams ? 'pointer' : 'not-allowed',
+                          }}
+                        >
+                          <Plus size={10} /> Insert page after p.{pageNum}
+                        </button>
+                        {insertPickerFor === n.id && (
+                          <div style={{ marginTop: 6, padding: '8px 10px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
+                            <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, marginBottom: 6 }}>WHICH FORMATION(S)?</div>
+                            {n.diagrams.map((d) => (
+                              <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: COLOR.textMuted, padding: '3px 0', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={insertSelection.includes(d.id)} onChange={() => toggleInsertSelection(d.id)} />
+                                {d.label}
+                              </label>
+                            ))}
+                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                              <button
+                                onClick={() => confirmInserts(n.id)}
+                                disabled={insertSelection.length === 0}
+                                className="td-focusable"
+                                style={{ background: insertSelection.length ? '#C77DBF' : COLOR.slateDim, color: COLOR.void, border: 'none', borderRadius: 3, padding: '5px 10px', fontSize: 10.5, fontWeight: 600, cursor: insertSelection.length ? 'pointer' : 'not-allowed' }}
+                              >
+                                Add {insertSelection.length || ''} page{insertSelection.length === 1 ? '' : 's'}
+                              </button>
+                              <button onClick={() => setInsertPickerFor(null)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 10.5, cursor: 'pointer' }}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
