@@ -316,6 +316,33 @@ export function PositionKeyTable({ positions, actors }) {
     </div>
   );
 }
+// Insert pages are created and stored on the Script side (per script
+// version), but the choreographer shouldn't have to open Script to find
+// them. This reads straight off `show.scriptVersions` — no new prop plumbing
+// — and works the same whether the entry is filed under Musical Numbers or
+// Scenes, since it only keys off entry.id.
+function ScriptInsertBadges({ entry, show }) {
+  const refs = (show.scriptVersions || []).flatMap((v) =>
+    (v.inserts || [])
+      .filter((i) => i.choreoId === entry.id)
+      .map((i) => ({ ...i, versionLabel: v.label || v.type }))
+  );
+  if (refs.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {refs.map((r) => (
+        <span
+          key={r.id}
+          className="td-mono"
+          style={{ fontSize: 9.5, color: '#C77DBF', border: '1px solid #C77DBF', borderRadius: 3, padding: '2px 7px' }}
+          title={`Choreography insert page in ${r.versionLabel}`}
+        >
+          Insert {r.refLabel}
+        </span>
+      ))}
+    </div>
+  );
+}
 export function ChoreographyEntryCard({ entry, show, actors, onEdit, onRemove }) {
   const scene = sceneById(show, entry.sceneId);
   const type = scene?.type || 'scene';
@@ -342,6 +369,8 @@ export function ChoreographyEntryCard({ entry, show, actors, onEdit, onRemove })
           </button>
         </div>
       </div>
+
+      <ScriptInsertBadges entry={entry} show={show} />
 
       {entry.notes && <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, marginTop: 8, lineHeight: 1.5 }}>{entry.notes}</div>}
 

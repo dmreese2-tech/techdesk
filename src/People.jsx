@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Mail, MailWarning, Mic, Pencil, Phone, Plus, Settings, Trash2, UserMinus, X } from 'lucide-react';
+import { AlertTriangle, LayoutGrid, Mail, MailWarning, Mic, Pencil, Phone, Plus, Settings, Table2, Trash2, UserMinus, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
@@ -328,19 +328,12 @@ export function PeopleSignIn({ personLabel, roleLabel, rolePlaceholder, roleOpti
   );
 }
 // ---------------------------------------------------------------------------
-// PEOPLE ROSTER ROW + GROUPED LIST
+// PERSON EDIT FORM — the contact + role editor. Pulled out of PeopleRosterRow
+// so the table view's rows can drop into the exact same editing UI instead of
+// carrying a second copy that could drift from it.
 // ---------------------------------------------------------------------------
-export function PeopleRosterRow({ person, assignment: assignmentProp, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople }) {
-  const [editing, setEditing] = useState(false);
-  const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // All of this person's roles on this show. A caller inside the grouped
-  // view passes the one specific assignment this row is standing in for
-  // (so a double-cast actor's two rows each show their own role); a caller
-  // outside a group context (rest-of-company list) leaves it unset and gets
-  // the first one, same as before.
+function PersonEditForm({ person, assignment, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople, onDone }) {
   const allAssignments = show ? assignmentsFor(person, show.id) : [];
-  const assignment = assignmentProp !== undefined ? assignmentProp : (allAssignments[0] || null);
   const history = show ? (person.assignments || []).filter((a) => a.showId !== show.id) : (person.assignments || []);
   const rolesOrBlank = () => (allAssignments.length ? allAssignments.map((a) => ({ roleTitle: a.roleTitle, category: a.category })) : [{ roleTitle: '', category: categoryOrder[0] }]);
   const [draft, setDraft] = useState({
@@ -353,7 +346,6 @@ export function PeopleRosterRow({ person, assignment: assignmentProp, show, show
     electric: assignment?.electric || false,
     monitorMix: assignment?.monitorMix || false,
   });
-  const Icon = assignment ? categoryMap[assignment.category]?.icon : null;
 
   const inputStyle = {
     background: COLOR.void,
@@ -365,38 +357,6 @@ export function PeopleRosterRow({ person, assignment: assignmentProp, show, show
     width: '100%',
   };
   const labelStyle = { fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 4, display: 'block' };
-
-  function startEdit() {
-    setDraft({
-      name: person.name,
-      phone: person.phone || '',
-      email: person.email || '',
-      roleRows: rolesOrBlank(),
-      miced: assignment?.miced || false,
-      micType: assignment?.micType || '',
-      electric: assignment?.electric || false,
-      monitorMix: assignment?.monitorMix || false,
-    });
-    setEditing(true);
-  }
-  // Off this production, not out of the company. Their history stays and they
-  // reappear under "not on this show", one click from being cast again.
-  function takeOffShow() {
-    setPeople((prev) =>
-      prev.map((p) =>
-        p.id === person.id
-          ? { ...p, assignments: (p.assignments || []).filter((a) => a.showId !== show.id) }
-          : p
-      )
-    );
-    setConfirmingRemove(false);
-  }
-
-  // Out of the company entirely — every show, every history.
-  function deleteFromCompany() {
-    setPeople((prev) => prev.filter((p) => p.id !== person.id));
-    setConfirmingDelete(false);
-  }
 
   function save() {
     setPeople((prev) =>
@@ -425,88 +385,146 @@ export function PeopleRosterRow({ person, assignment: assignmentProp, show, show
         return { ...p, ...contact, assignments: [...others, ...newAssignments] };
       })
     );
-    setEditing(false);
+    onDone();
+  }
+
+  return (
+    <div>
+      {show && (
+        <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.blueprint, letterSpacing: '0.04em', marginBottom: 8 }}>
+          {roleLabel} & CATEGORY ARE SPECIFIC TO {show.title.toUpperCase()}
+        </div>
+      )}
+      <div style={{ marginBottom: 8, maxWidth: show ? 320 : undefined }}>
+        <label className="td-mono" style={labelStyle}>NAME</label>
+        <input className="td-focusable" style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+      </div>
+      {show && (
+        <RoleRows
+          rows={draft.roleRows}
+          setRows={(updater) => setDraft((d) => ({ ...d, roleRows: typeof updater === 'function' ? updater(d.roleRows) : updater }))}
+          roleLabel={roleLabel}
+          roleOptions={roleOptions}
+          categoryMap={categoryMap}
+          categoryOrder={categoryOrder}
+          inputStyle={inputStyle}
+          labelStyle={labelStyle}
+        />
+      )}
+
+      {/* Contact details. The email is not decoration: it is what the claim
+          flow matches on when this person signs in, and without it their
+          account can never be linked to this roster entry. Cast can't read
+          anyone's but their own — see 09-contact-privacy.sql. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <div>
+          <label className="td-mono" style={labelStyle}>PHONE</label>
+          <input className="td-focusable" style={inputStyle} value={draft.phone} placeholder="Optional" onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
+        </div>
+        <div>
+          <label className="td-mono" style={labelStyle}>EMAIL</label>
+          <input
+            className="td-focusable"
+            style={inputStyle}
+            type="email"
+            value={draft.email}
+            placeholder="Matches their sign-in to this roster entry"
+            onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+          />
+        </div>
+      </div>
+      {show && <AudioOptionsFields audioOptions={audioOptions} value={draft} onChange={setDraft} />}
+      {history.length > 0 && (
+        <div style={{ marginBottom: 10, marginTop: 10 }}>
+          <label className="td-mono" style={labelStyle}>{show ? 'HISTORY (OTHER SHOWS)' : 'SHOW HISTORY'}</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {history.map((a) => {
+              const s = shows.find((sh) => sh.id === a.showId);
+              return (
+                <span key={a.id} className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 8px' }}>
+                  {s ? s.title : a.showId} — {a.roleTitle}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button
+          onClick={save}
+          disabled={!draft.name.trim() || (!!show && !draft.roleRows.some((r) => r.roleTitle.trim()))}
+          className="td-focusable"
+          style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '6px 14px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+        >
+          Save
+        </button>
+        <button
+          onClick={onDone}
+          className="td-focusable"
+          style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 14px', fontSize: 11.5, cursor: 'pointer' }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// PEOPLE ROSTER ROW + GROUPED LIST
+// ---------------------------------------------------------------------------
+export function PeopleRosterRow({ person, assignment: assignmentProp, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople }) {
+  const [editing, setEditing] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // All of this person's roles on this show. A caller inside the grouped
+  // view passes the one specific assignment this row is standing in for
+  // (so a double-cast actor's two rows each show their own role); a caller
+  // outside a group context (rest-of-company list) leaves it unset and gets
+  // the first one, same as before.
+  const allAssignments = show ? assignmentsFor(person, show.id) : [];
+  const assignment = assignmentProp !== undefined ? assignmentProp : (allAssignments[0] || null);
+  const history = show ? (person.assignments || []).filter((a) => a.showId !== show.id) : (person.assignments || []);
+  const Icon = assignment ? categoryMap[assignment.category]?.icon : null;
+
+  function startEdit() {
+    setEditing(true);
+  }
+
+  // Off this production, not out of the company. Their history stays and they
+  // reappear under "not on this show", one click from being cast again.
+  function takeOffShow() {
+    setPeople((prev) =>
+      prev.map((p) =>
+        p.id === person.id
+          ? { ...p, assignments: (p.assignments || []).filter((a) => a.showId !== show.id) }
+          : p
+      )
+    );
+    setConfirmingRemove(false);
+  }
+
+  // Out of the company entirely — every show, every history.
+  function deleteFromCompany() {
+    setPeople((prev) => prev.filter((p) => p.id !== person.id));
+    setConfirmingDelete(false);
   }
 
   if (editing) {
     return (
       <div style={{ padding: '12px 4px', borderBottom: `1px solid ${COLOR.line}`, background: COLOR.panel }}>
-        {show && (
-          <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.blueprint, letterSpacing: '0.04em', marginBottom: 8 }}>
-            {roleLabel} & CATEGORY ARE SPECIFIC TO {show.title.toUpperCase()}
-          </div>
-        )}
-        <div style={{ marginBottom: 8, maxWidth: show ? 320 : undefined }}>
-          <label className="td-mono" style={labelStyle}>NAME</label>
-          <input className="td-focusable" style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-        </div>
-        {show && (
-          <RoleRows
-            rows={draft.roleRows}
-            setRows={(updater) => setDraft((d) => ({ ...d, roleRows: typeof updater === 'function' ? updater(d.roleRows) : updater }))}
-            roleLabel={roleLabel}
-            roleOptions={roleOptions}
-            categoryMap={categoryMap}
-            categoryOrder={categoryOrder}
-            inputStyle={inputStyle}
-            labelStyle={labelStyle}
-          />
-        )}
-
-        {/* Contact details. The email is not decoration: it is what the claim
-            flow matches on when this person signs in, and without it their
-            account can never be linked to this roster entry. Cast can't read
-            anyone's but their own — see 09-contact-privacy.sql. */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-          <div>
-            <label className="td-mono" style={labelStyle}>PHONE</label>
-            <input className="td-focusable" style={inputStyle} value={draft.phone} placeholder="Optional" onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
-          </div>
-          <div>
-            <label className="td-mono" style={labelStyle}>EMAIL</label>
-            <input
-              className="td-focusable"
-              style={inputStyle}
-              type="email"
-              value={draft.email}
-              placeholder="Matches their sign-in to this roster entry"
-              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-            />
-          </div>
-        </div>
-        {show && <AudioOptionsFields audioOptions={audioOptions} value={draft} onChange={setDraft} />}
-        {history.length > 0 && (
-          <div style={{ marginBottom: 10, marginTop: 10 }}>
-            <label className="td-mono" style={labelStyle}>{show ? 'HISTORY (OTHER SHOWS)' : 'SHOW HISTORY'}</label>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {history.map((a) => {
-                const s = shows.find((sh) => sh.id === a.showId);
-                return (
-                  <span key={a.id} className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 8px' }}>
-                    {s ? s.title : a.showId} — {a.roleTitle}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <button
-            onClick={save}
-            disabled={!draft.name.trim() || (!!show && !draft.roleRows.some((r) => r.roleTitle.trim()))}
-            className="td-focusable"
-            style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '6px 14px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
-          >
-            Save
-          </button>
-          <button
-            onClick={() => setEditing(false)}
-            className="td-focusable"
-            style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 14px', fontSize: 11.5, cursor: 'pointer' }}
-          >
-            Cancel
-          </button>
-        </div>
+        <PersonEditForm
+          person={person}
+          assignment={assignment}
+          show={show}
+          shows={shows}
+          categoryMap={categoryMap}
+          categoryOrder={categoryOrder}
+          roleLabel={roleLabel}
+          roleOptions={roleOptions}
+          audioOptions={audioOptions}
+          setPeople={setPeople}
+          onDone={() => setEditing(false)}
+        />
       </div>
     );
   }
@@ -738,6 +756,276 @@ export function PeopleRosterGroups({ people, show, shows, categoryMap, categoryO
   );
 }
 // ---------------------------------------------------------------------------
+// PEOPLE TABLE — one line per person: contact details plus whatever they're
+// playing on this show, for scanning or printing a callsheet-style list
+// instead of paging through the grouped cards. Editing drops the row into
+// the same PersonEditForm used by the card view, so the two stay in sync.
+// ---------------------------------------------------------------------------
+function PeopleTableRow({ person, assignment: assignmentProp, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople, colCount, showAudioCol }) {
+  const [editing, setEditing] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const allAssignments = show ? assignmentsFor(person, show.id) : [];
+  const assignment = assignmentProp !== undefined ? assignmentProp : (allAssignments[0] || null);
+  const history = show ? (person.assignments || []).filter((a) => a.showId !== show.id) : (person.assignments || []);
+  const roleText = allAssignments.map((a) => a.roleTitle).filter(Boolean).join('; ');
+  const categoryText = allAssignments.map((a) => categoryMap[a.category]?.label || a.category).filter(Boolean).join('; ');
+
+  function takeOffShow() {
+    setPeople((prev) =>
+      prev.map((p) =>
+        p.id === person.id
+          ? { ...p, assignments: (p.assignments || []).filter((a) => a.showId !== show.id) }
+          : p
+      )
+    );
+    setConfirmingRemove(false);
+  }
+
+  function deleteFromCompany() {
+    setPeople((prev) => prev.filter((p) => p.id !== person.id));
+    setConfirmingDelete(false);
+  }
+
+  const cellStyle = { padding: '9px 8px', borderBottom: `1px solid ${COLOR.line}`, verticalAlign: 'top' };
+  const truncate = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 };
+
+  if (editing) {
+    return (
+      <tr>
+        <td colSpan={colCount} style={{ padding: '12px 8px', borderBottom: `1px solid ${COLOR.line}`, background: COLOR.panel }}>
+          <PersonEditForm
+            person={person}
+            assignment={assignment}
+            show={show}
+            shows={shows}
+            categoryMap={categoryMap}
+            categoryOrder={categoryOrder}
+            roleLabel={roleLabel}
+            roleOptions={roleOptions}
+            audioOptions={audioOptions}
+            setPeople={setPeople}
+            onDone={() => setEditing(false)}
+          />
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      <tr>
+        <td style={cellStyle}>
+          <div className="td-body" style={{ fontSize: 13, color: COLOR.textPrimary, fontWeight: 500, ...truncate }}>{person.name}</div>
+        </td>
+        {show && (
+          <td style={cellStyle}>
+            <span className="td-mono" style={{ fontSize: 11.5, color: assignment ? COLOR.textMuted : COLOR.textFaint, fontStyle: assignment ? 'normal' : 'italic' }}>
+              {roleText || `Not on ${show.title}`}
+            </span>
+          </td>
+        )}
+        {show && (
+          <td style={cellStyle}>
+            <span className="td-mono" style={{ fontSize: 11.5, color: COLOR.textMuted }}>{categoryText || '—'}</span>
+          </td>
+        )}
+        <td style={cellStyle}>
+          {person.phone ? (
+            <a href={`tel:${person.phone}`} className="td-focusable td-mono" style={{ color: COLOR.textMuted, fontSize: 11.5, textDecoration: 'none' }}>
+              {person.phone}
+            </a>
+          ) : (
+            <span className="td-mono" style={{ fontSize: 11.5, color: COLOR.textFaint }}>—</span>
+          )}
+        </td>
+        <td style={cellStyle}>
+          {person.email ? (
+            <a href={`mailto:${person.email}`} className="td-focusable td-mono" style={{ color: COLOR.textMuted, fontSize: 11.5, textDecoration: 'none' }}>
+              {person.email}
+            </a>
+          ) : (
+            <span title={`No email for ${person.name}. Without one they can't link their account to this roster entry.`} style={{ color: COLOR.amberDim, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <MailWarning size={12} strokeWidth={1.75} />
+              <span className="td-mono" style={{ fontSize: 11 }}>Missing</span>
+            </span>
+          )}
+        </td>
+        {showAudioCol && (
+          <td style={cellStyle}>
+            {audioOptions === 'mic' && assignment?.miced && (
+              <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                MIC'D{assignment.micType ? ` · ${assignment.micType}` : ''}
+              </span>
+            )}
+            {audioOptions === 'electric' && assignment?.electric && (
+              <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                ELECTRIC{assignment.monitorMix ? ' · OWN MIX' : ''}
+              </span>
+            )}
+          </td>
+        )}
+        {!show && (
+          <td style={cellStyle}>
+            <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint }}>
+              {history.length ? `${history.length} show${history.length === 1 ? '' : 's'}` : '—'}
+            </span>
+          </td>
+        )}
+        <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {show && assignment && (
+              <button
+                onClick={() => { setConfirmingRemove((v) => !v); setConfirmingDelete(false); }}
+                className="td-focusable"
+                title={`Take ${person.name} off ${show.title}. They stay on the company roster.`}
+                aria-label={`Take ${person.name} off ${show.title}`}
+                style={{ background: 'none', border: 'none', color: confirmingRemove ? COLOR.amber : COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+              >
+                <UserMinus size={13} strokeWidth={1.75} />
+              </button>
+            )}
+            <button
+              onClick={() => { setConfirmingDelete((v) => !v); setConfirmingRemove(false); }}
+              className="td-focusable"
+              title={`Remove ${person.name} from the company roster entirely — every production, not just this one.`}
+              aria-label={`Remove ${person.name} from the company`}
+              style={{ background: 'none', border: 'none', color: confirmingDelete ? COLOR.amber : COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+            >
+              <Trash2 size={13} strokeWidth={1.75} />
+            </button>
+            {!show || assignment ? (
+              <button onClick={() => setEditing(true)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label={`Edit ${person.name}`}>
+                <Pencil size={13} strokeWidth={1.75} />
+              </button>
+            ) : (
+              <button
+                onClick={() => setEditing(true)}
+                className="td-focusable"
+                style={{ background: 'transparent', color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '3px 9px', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Add to show
+              </button>
+            )}
+          </div>
+        </td>
+      </tr>
+      {(confirmingRemove || confirmingDelete) && (
+        <tr>
+          <td colSpan={colCount} style={{ padding: '8px 10px', borderBottom: `1px solid ${COLOR.amberDim}`, background: COLOR.void }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, flex: 1, minWidth: 120, lineHeight: 1.5 }}>
+                {confirmingDelete ? (
+                  <>
+                    DELETE {person.name.toUpperCase()} FROM THE COMPANY?
+                    {(person.assignments || []).length ? ` ON ${(person.assignments || []).length} SHOW${(person.assignments || []).length === 1 ? '' : 'S'}` : ''}
+                    {person.userId ? ' — AN ACCOUNT IS LINKED TO THEM' : ''}
+                  </>
+                ) : (
+                  <>TAKE {person.name.toUpperCase()} OFF {(show?.title || 'THIS SHOW').toUpperCase()}?</>
+                )}
+              </span>
+              <button
+                onClick={confirmingDelete ? deleteFromCompany : takeOffShow}
+                className="td-focusable"
+                style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '4px 11px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}
+              >
+                {confirmingDelete ? 'Delete' : 'Remove'}
+              </button>
+              <button
+                onClick={() => { setConfirmingDelete(false); setConfirmingRemove(false); }}
+                className="td-focusable"
+                style={{ background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '4px 11px', fontSize: 10.5, cursor: 'pointer' }}
+              >
+                {confirmingDelete ? 'Cancel' : 'Keep'}
+              </button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+export function PeopleTable({ people, show, shows, categoryMap, categoryOrder, roleLabel, roleOptions, audioOptions, setPeople }) {
+  const onShow = show ? people.filter((p) => assignmentFor(p, show.id)) : [];
+  const notOnShow = show ? people.filter((p) => !assignmentFor(p, show.id)) : people;
+
+  const showAudioCol = !!(show && audioOptions);
+  // NAME, [ROLE, CATEGORY if show], PHONE, EMAIL, [AUDIO if applicable],
+  // [SHOWS if no show selected], plus the trailing actions column.
+  const colCount = (show ? 5 : 4) + (showAudioCol ? 1 : 0) + 1;
+
+  const th = {
+    textAlign: 'left',
+    padding: '7px 8px',
+    fontSize: 9.5,
+    letterSpacing: '0.06em',
+    color: COLOR.textFaint,
+    borderBottom: `1px solid ${COLOR.lineBright}`,
+    whiteSpace: 'nowrap',
+  };
+
+  function Section({ title, list }) {
+    if (!list.length) return null;
+    return (
+      <div style={{ marginBottom: 22 }}>
+        {title && (
+          <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em', marginBottom: 8 }}>
+            {title}
+          </div>
+        )}
+        <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={th}>NAME</th>
+                {show && <th style={th}>{roleLabel}</th>}
+                {show && <th style={th}>CATEGORY</th>}
+                <th style={th}>PHONE</th>
+                <th style={th}>EMAIL</th>
+                {showAudioCol && <th style={th}>AUDIO</th>}
+                {!show && <th style={th}>SHOWS</th>}
+                <th style={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((p) => (
+                <PeopleTableRow
+                  key={p.id}
+                  person={p}
+                  show={show}
+                  shows={shows}
+                  categoryMap={categoryMap}
+                  categoryOrder={categoryOrder}
+                  roleLabel={roleLabel}
+                  roleOptions={roleOptions}
+                  audioOptions={audioOptions}
+                  setPeople={setPeople}
+                  colCount={colCount}
+                  showAudioCol={showAudioCol}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {show && onShow.length > 0 && <Section title={`ON ${show.title.toUpperCase()} — ${onShow.length}`} list={onShow} />}
+      {show && onShow.length === 0 && (
+        <div style={{ marginBottom: 26 }}>
+          <StubPanel label={`No one is on ${show.title} yet`} hint="Add people to the company roster first, then assign them to this show and pick what they play. Cast pick from the character list under Characters; band and staff pick from the position lists in Settings." />
+        </div>
+      )}
+      {notOnShow.length > 0 && <Section title={show ? `REST OF THE COMPANY — ${notOnShow.length}` : null} list={notOnShow} />}
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
 // NEW PERSON FORM (manual add, for whoever isn't signing themselves up)
 // ---------------------------------------------------------------------------
 export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions, onAdd, onClose }) {
@@ -845,6 +1133,9 @@ export function NewPersonForm({ show, personLabel, roleLabel, rolePlaceholder, r
 // ---------------------------------------------------------------------------
 export function PeopleModule({ show, shows, people, setPeople, currentUserId, setCurrentUserId, personLabel, roleLabel, rolePlaceholder, roleOptions, categoryMap, categoryOrder, audioOptions, importSpec }) {
   const [showForm, setShowForm] = useState(false);
+  // 'grouped' is the existing card layout, organized by department. 'table'
+  // is the new flat, line-per-person view for scanning contact details.
+  const [view, setView] = useState('grouped');
 
   function handleManualAdd({ name, phone, email, roles, ...audioFields }) {
     const existing = people.find((p) => p.name.toLowerCase() === name.toLowerCase());
@@ -924,29 +1215,79 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
         <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em' }}>
           {people.length} ON THE {personLabel.toUpperCase()} LIST
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="td-focusable"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'transparent',
-            color: COLOR.amber,
-            border: `1px solid ${COLOR.amber}`,
-            borderRadius: 3,
-            padding: '7px 14px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          <Plus size={14} /> Add manually
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* View toggle: grouped cards (default, organized by department) vs
+              a flat table — one line per person with contact details laid out
+              in columns, for scanning or printing a callsheet-style list. */}
+          <div style={{ display: 'flex', border: `1px solid ${COLOR.line}`, borderRadius: 3, overflow: 'hidden' }}>
+            <button
+              onClick={() => setView('grouped')}
+              className="td-focusable"
+              title="Grouped view"
+              aria-label="Grouped view"
+              aria-pressed={view === 'grouped'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: view === 'grouped' ? COLOR.cardHover : 'transparent',
+                color: view === 'grouped' ? COLOR.amber : COLOR.textFaint,
+                border: 'none',
+                padding: '6px 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <LayoutGrid size={13} strokeWidth={1.75} />
+            </button>
+            <button
+              onClick={() => setView('table')}
+              className="td-focusable"
+              title="Table view"
+              aria-label="Table view"
+              aria-pressed={view === 'table'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: view === 'table' ? COLOR.cardHover : 'transparent',
+                color: view === 'table' ? COLOR.amber : COLOR.textFaint,
+                border: 'none',
+                borderLeft: `1px solid ${COLOR.line}`,
+                padding: '6px 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <Table2 size={13} strokeWidth={1.75} />
+            </button>
+          </div>
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="td-focusable"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'transparent',
+              color: COLOR.amber,
+              border: `1px solid ${COLOR.amber}`,
+              borderRadius: 3,
+              padding: '7px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <Plus size={14} /> Add manually
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -965,7 +1306,11 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
       )}
 
       {people.length > 0 ? (
-        <PeopleRosterGroups people={people} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
+        view === 'table' ? (
+          <PeopleTable people={people} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
+        ) : (
+          <PeopleRosterGroups people={people} show={show} shows={shows} categoryMap={categoryMap} categoryOrder={categoryOrder} roleLabel={roleLabel} roleOptions={roleOptions} audioOptions={audioOptions} setPeople={setPeople} />
+        )
       ) : (
         <StubPanel label={`No one on the ${personLabel} list yet`} hint="This is the company-wide roster, not a single show. Add people once here, then assign them to individual productions. Removing someone here removes them from every show." />
       )}
