@@ -212,6 +212,42 @@ export const setSpec = {
   }),
 };
 
+// --- Links --------------------------------------------------------------
+// Category is matched loosely against LINK_CATEGORIES' labels (Links.jsx) so
+// "Line Learning" and "line learning" both land correctly; anything that
+// doesn't match falls through to 'other' rather than being rejected.
+const LINK_CATEGORY_KEYS = {
+  headshots: 'headshots',
+  bios: 'bios',
+  references: 'references',
+  marketing: 'marketing',
+  'marketing / press': 'marketing',
+  social: 'social',
+  'social media': 'social',
+  'line learning': 'line_learning',
+  line_learning: 'line_learning',
+  forms: 'forms',
+  other: 'other',
+};
+export const linksSpec = {
+  filename: 'links',
+  columns: [C('Label', true), C('URL', true), C('Category'), C('Audience'), C('Notes')],
+  sample: { Label: 'Headshot upload', URL: 'https://forms.google.com/...', Category: 'Headshots', Audience: 'Cast', Notes: 'Due before first tech' },
+  build: (r) => {
+    const rawUrl = (r.get('URL') || '').trim();
+    const url = rawUrl && !/^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl) ? `https://${rawUrl}` : rawUrl;
+    const rawAudience = (r.get('Audience') || 'everyone').toLowerCase().trim();
+    return {
+      id: uid('lnk'),
+      label: r.get('Label'),
+      url,
+      category: LINK_CATEGORY_KEYS[(r.get('Category') || 'other').toLowerCase().trim()] || 'other',
+      audience: ['everyone', 'cast', 'crew', 'staff', 'musicians'].includes(rawAudience) ? rawAudience : 'everyone',
+      notes: r.get('Notes') || '',
+    };
+  },
+};
+
 // --- Inventory --------------------------------------------------------------
 export const inventorySpec = {
   filename: 'inventory',

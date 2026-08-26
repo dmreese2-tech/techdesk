@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Drama, Bell, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, Link2, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { STATUS_META, byName, assignmentFor } from './shared.jsx';
@@ -631,6 +631,7 @@ export function Sidebar({ active, setActive, shows, currentShowId, setCurrentSho
     { id: 'set', label: 'Set', icon: Box },
     { id: 'runofshow', label: 'Run of Show', icon: ListChecks },
     { id: 'script', label: 'Script', icon: FileText },
+    { id: 'links', label: 'Links', icon: Link2 },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
   return (

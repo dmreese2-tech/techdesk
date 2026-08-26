@@ -37,6 +37,7 @@ export const SECTION_MODULE = {
   set: 'set',
   runofshow: 'runofshow',
   script: 'script',
+  links: 'links',
 };
 
 // Why you can't edit this, in the words of the thing that decided.

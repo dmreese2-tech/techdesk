@@ -30,6 +30,7 @@ export const GRANTABLE_MODULES = [
   { key: 'set', label: 'Set', note: 'Set pieces and where they live.' },
   { key: 'runofshow', label: 'Run of Show', note: 'Cue sheets.' },
   { key: 'script', label: 'Script', note: 'The PDF and its markers.' },
+  { key: 'links', label: 'Links', note: 'Headshots, bios, references, marketing, social, line learning — the standing list of off-site links for the show.' },
 ];
 
 export const MODULE_LABELS = Object.fromEntries(GRANTABLE_MODULES.map((m) => [m.key, m.label]));
@@ -45,8 +46,8 @@ export const POSITION_DEFAULTS = {
   'director': { modules: ['production', 'scenes', 'characters', 'actors', 'schedule'], companyWide: true },
   'assistant director': { modules: ['production', 'scenes', 'characters', 'actors', 'schedule'], companyWide: true },
 
-  'production manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script'] },
-  'stage manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script'] },
+  'production manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script', 'links'] },
+  'stage manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script', 'links'] },
   'assistant stage manager': { modules: ['calls', 'groups', 'runofshow'] },
 
   // `inventory` holds CATEGORY KEYS, not labels — the same keys the stock

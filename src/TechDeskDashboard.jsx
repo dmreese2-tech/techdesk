@@ -209,6 +209,7 @@ import { RunOfShowModule } from './RunOfShow.jsx';
 import { InventoryModule } from './Inventory.jsx';
 import { PropsModule } from './Props.jsx';
 import { CostumesModule } from './Costumes.jsx';
+import { LinksModule } from './Links.jsx';
 import { StubPanel } from './ui.jsx';
 
 
@@ -304,7 +305,7 @@ import {
 const SECTION_IDS = [
   'dashboard', 'schedule', 'scenes', 'characters', 'crew', 'actors', 'musicians', 'staff',
   'choreography', 'costumes', 'props', 'calls', 'audio', 'inventory', 'set',
-  'runofshow', 'script', 'settings',
+  'runofshow', 'script', 'links', 'settings',
 ];
 
 
@@ -823,6 +824,12 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           title: currentShow.script ? `${(currentShow.script.markers || []).length} Cues Placed` : 'No Script Uploaded',
         }
       : { eyebrow: 'SCRIPT', title: 'No Show Selected' },
+    links: currentShow
+      ? {
+          eyebrow: `LINKS — ${currentShow.title.toUpperCase()}`,
+          title: `${(currentShow.links || []).length} Link${(currentShow.links || []).length === 1 ? '' : 's'} on File`,
+        }
+      : { eyebrow: 'LINKS', title: 'No Show Selected' },
     settings: { eyebrow: 'SHOP SETTINGS', title: 'Board Configuration' },
   };
   const header = headerConfig[active] || headerConfig.dashboard;
@@ -1138,6 +1145,12 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             <ScriptModule show={currentShow} orgId={orgId} cueSheets={cueSheets} setShows={setShows} CUE_DEPTS={cueDepts} canEdit={sectionWritable} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="script" />
+          ))}
+        {active === 'links' &&
+          (currentShow ? (
+            <LinksModule show={currentShow} setShows={setShows} />
+          ) : (
+            <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="links" />
           ))}
         {active === 'settings' && (
           <SettingsModule

@@ -43,6 +43,9 @@ const SHOW_MODULES = {
   // Script versions: the same production's pages marked up for choreography,
   // for cues, for blocking. Siblings, not revisions of one another.
   script: 'scriptVersions',
+  // Headshot upload, bio submission, references, marketing, social, line
+  // learning — the show's standing list of off-site links. See Links.jsx.
+  links: 'links',
 };
 
 // What we last wrote, per show and module, by array identity. Modules update
@@ -96,6 +99,10 @@ function showRowToJs(row, itemsForShow) {
     props: itemsForShow ? itemsForShow.props || [] : row.props || [],
     groups: itemsForShow ? itemsForShow.groups || [] : row.groups || [],
     scriptVersions: itemsForShow ? itemsForShow.script || [] : [],
+    // No legacy column ever held links — it was born as a show_items module —
+    // so there is no old-column fallback to read here, unlike everything else
+    // in this function.
+    links: itemsForShow ? itemsForShow.links || [] : [],
 
     script: meta ? { ...meta, pdfBytes: null } : null, // bytes fetched separately, on demand, from Storage
   };
