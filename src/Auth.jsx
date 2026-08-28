@@ -20,6 +20,10 @@ export default function Auth({ onReady, forcePicker = false }) {
   const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Only used in signup mode. The account itself can't be created without
+  // this — see supabase/22-invite-gated-signup.sql — so it travels as
+  // options.data on signUp() rather than being asked for after the fact.
+  const [signupInviteCode, setSignupInviteCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -66,8 +70,27 @@ export default function Auth({ onReady, forcePicker = false }) {
     setBusy(true);
     try {
       if (mode === 'signup') {
-        const { error: err } = await supabase.auth.signUp({ email, password });
+        // The invite code rides along as user_metadata. The database-side
+        // hook (hook_require_invite_code) inspects it before the account is
+        // created at all and rejects the request if it's missing or doesn't
+        // match a company — this call throws with that message in that
+        // case, same as any other signUp error.
+        const { error: err } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { invite_code: signupInviteCode.trim() } },
+        });
         if (err) throw err;
+        // The account only exists because the code was valid, so use that
+        // same code to actually join that company now. Calling onReady
+        // directly (rather than waiting on the session-change effect below
+        // to notice) avoids a moment where a brand-new account with zero
+        // orgs yet would otherwise flash the create/join picker.
+        const { data: joinedOrgId, error: joinErr } = await supabase.rpc('join_org_by_code', {
+          code: signupInviteCode.trim(),
+        });
+        if (joinErr) throw joinErr;
+        if (joinedOrgId) onReady(joinedOrgId);
       } else {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
@@ -153,12 +176,21 @@ export default function Auth({ onReady, forcePicker = false }) {
         </div>
         <input type="email" required placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
         <input type="password" required minLength={6} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+        {mode === 'signup' && (
+          <input
+            required
+            placeholder="Invite code, e.g. K4TM-9QXB"
+            value={signupInviteCode}
+            onChange={(e) => setSignupInviteCode(e.target.value)}
+            style={inputStyle}
+          />
+        )}
         <button type="submit" disabled={busy} style={{ ...buttonStyle, opacity: busy ? 0.6 : 1 }}>
           {busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'}
         </button>
         {mode === 'signup' && (
           <div style={{ color: COLOR.textFaint, fontSize: 11, textAlign: 'center' }}>
-            Depending on your project's auth settings, you may need to confirm your email before signing in.
+            Ask your TD or another admin for your company's invite code — an account can't be created without one.
           </div>
         )}
       </form>

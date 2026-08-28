@@ -157,10 +157,24 @@ function isPermissionDenial(error) {
   return error?.code === '42501' || /row-level security|permission denied/i.test(error?.message || '');
 }
 
-function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError, onDenied) {
+function useSyncedCollection(hydrated, items, getId, saveFn, deleteFn, setLastSavedAt, setPersistenceError, onDenied, remoteSyncRef) {
   const prevIdsRef = useRef(null);
   useEffect(() => {
     if (!hydrated) return undefined;
+    // This change is the server's own answer replacing our state wholesale
+    // (the realtime refetch below), not something a person did in the UI.
+    // Diffing it against what we last saved and deleting whatever's "missing"
+    // is exactly backwards here: if the fetch that produced this came back
+    // empty — a dropped connection, an auth token refreshing at the wrong
+    // moment, RLS transiently seeing no membership — this is the one place
+    // "the server says nothing exists" could get misread as "the user
+    // deleted everything," and turned into a real DELETE for every row this
+    // collection ever knew about. So a remote replacement only ever moves
+    // the baseline forward; it is never allowed to trigger a save or delete.
+    if (remoteSyncRef?.current) {
+      prevIdsRef.current = new Set(items.map(getId));
+      return undefined;
+    }
     const timeout = setTimeout(() => {
       const currentIds = new Set(items.map(getId));
       const removed = prevIdsRef.current ? [...prevIdsRef.current].filter((id) => !currentIds.has(id)) : [];
@@ -488,6 +502,11 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   const bandDepartmentOrder = useMemo(() => orderFor(bandDepartments, departmentOrder), [bandDepartments, departmentOrder]);
 
   const [hydrated, setHydrated] = useState(false);
+  // True for the render(s) produced by the realtime refetch replacing shows/
+  // crew/actors/staff/musicians/calls/inventory in one shot. Read by every
+  // useSyncedCollection below so that a server-driven replacement can never
+  // be diffed against and turned into a delete. See useSyncedCollection.
+  const remoteSyncRef = useRef(false);
   const [persistenceError, setPersistenceError] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
@@ -593,6 +612,10 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     const refetch = () => {
       loadOrgData(orgId)
         .then((data) => {
+          // Set before any of the seven setX calls below, so every
+          // useSyncedCollection sees it on the render this produces and
+          // treats the replacement as a resync, never a delete.
+          remoteSyncRef.current = true;
           setShows(data.shows);
           setCrew(data.crew);
           setActors(data.actors);
@@ -651,13 +674,20 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     () => setDeniedMessage("That change wasn't saved — this section isn't yours to edit. Reload to see where it stands."),
     []
   );
-  useSyncedCollection(hydrated, shows, (s) => s.id, (items) => saveShows(items, orgId), deleteShows, setLastSavedAt, setPersistenceError, reportDenied);
-  useSyncedCollection(hydrated, crew, (p) => p.id, (items) => savePeople('crew', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
-  useSyncedCollection(hydrated, actors, (p) => p.id, (items) => savePeople('actor', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
-  useSyncedCollection(hydrated, staff, (p) => p.id, (items) => savePeople('staff', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
-  useSyncedCollection(hydrated, musicians, (p) => p.id, (items) => savePeople('musician', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied);
-  useSyncedCollection(hydrated, calls, (c) => c.id, (items) => saveCalls(items, orgId), deleteCalls, setLastSavedAt, setPersistenceError, reportDenied);
-  useSyncedCollection(hydrated, inventory, (i) => i.id, (items) => saveInventory(items, orgId), deleteInventory, setLastSavedAt, setPersistenceError, reportDenied);
+  useSyncedCollection(hydrated, shows, (s) => s.id, (items) => saveShows(items, orgId), deleteShows, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  useSyncedCollection(hydrated, crew, (p) => p.id, (items) => savePeople('crew', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  useSyncedCollection(hydrated, actors, (p) => p.id, (items) => savePeople('actor', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  useSyncedCollection(hydrated, staff, (p) => p.id, (items) => savePeople('staff', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  useSyncedCollection(hydrated, musicians, (p) => p.id, (items) => savePeople('musician', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  useSyncedCollection(hydrated, calls, (c) => c.id, (items) => saveCalls(items, orgId), deleteCalls, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  useSyncedCollection(hydrated, inventory, (i) => i.id, (items) => saveInventory(items, orgId), deleteInventory, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
+  // Runs after all seven hooks above on the same render (hook effects fire in
+  // declaration order), so by the time this clears the flag every one of them
+  // has already seen it and resynced instead of diffing. Ordinary local edits
+  // never touch this ref at all — it only ever gets set by the refetch above.
+  useEffect(() => {
+    remoteSyncRef.current = false;
+  }, [shows, crew, actors, staff, musicians, calls, inventory]);
 
   // Cue sheets: keyed by show, replaced wholesale per show on change —
   // simpler and safe since only one department is ever editing a given
