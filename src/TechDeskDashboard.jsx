@@ -217,7 +217,7 @@ import { CrewModule } from './Crew.jsx';
 import { ActorsModule, StaffModule, MusiciansModule } from './People.jsx';
 import { SetModule } from './Set.jsx';
 import { ChoreographyModule } from './Choreography.jsx';
-import { ScheduleModule } from './Schedule.jsx';
+import { ScheduleModule, ScheduleViewSwitch } from './Schedule.jsx';
 import { AudioModule } from './Audio.jsx';
 import { RunOfShowModule } from './RunOfShow.jsx';
 import { InventoryModule } from './Inventory.jsx';
@@ -448,6 +448,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // The roster entry this account is linked to, if any. Undefined until asked,
   // null if the account isn't linked to anybody.
   const [me, setMe] = useState(undefined);
+  // The signed-in auth user, kept so Schedule can find every roster record
+  // linked to this account. `me` is a single people_view row; someone linked
+  // as crew AND as cast has two, and both get called separately.
+  const [authUserId, setAuthUserId] = useState(null);
+  // Which Schedule view is on. Lifted out of ScheduleModule so the switch
+  // can render above the read-only gate — see ScheduleViewSwitch.
+  const [scheduleView, setScheduleView] = useState('list');
   const [deniedMessage, setDeniedMessage] = useState('');
   // On a phone the rail is a drawer over the content rather than a column
   // beside it; on a desktop it stays put and this flag is ignored.
@@ -537,6 +544,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
         setOrgLogo(data.settings.logoUrl || '');
         supabase.auth.getUser().then(({ data: u }) => {
           if (!u?.user) return;
+          setAuthUserId(u.user.id);
           supabase
             .from('org_members')
             .select('tier')
@@ -948,6 +956,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           {!isNarrow && <HouseClock />}
         </div>
 
+        {/* Above the gate on purpose: choosing a view is reading, not editing,
+            and the people who need Show My Calls are the ones without a
+            schedule grant. Inside the gate this pill would be visible and dead. */}
+        {active === 'schedule' && currentShow && (
+          <ScheduleViewSwitch view={scheduleView} setView={setScheduleView} />
+        )}
+
         <ReadOnlyGate writable={sectionWritable} module={sectionModule} admin={active === 'settings'}>
         {active === 'dashboard' && (
           <>
@@ -1080,6 +1095,12 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
               show={currentShow}
               rosters={{ crew, actors, staff, musicians }}
               onScheduleChange={updateShowSchedule}
+              view={scheduleView}
+              myUserId={authUserId}
+              CAST_TYPES={castTypes}
+              CAST_TYPE_ORDER={castTypeOrder}
+              DEPARTMENTS={departments}
+              DEPARTMENT_ORDER={departmentOrder}
             />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="schedule" />
