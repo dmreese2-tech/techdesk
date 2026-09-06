@@ -13,7 +13,8 @@ import { Menu, Building2, LogOut, LayoutGrid, Users, Boxes, ListChecks, Settings
 // Script.jsx set its own and quietly put the CDN path back. Last write won,
 // so bundling the worker had no effect until this went.
 import {
-  loadOrgData, saveShows, deleteShows, savePeople, deletePeople, saveCalls, deleteCalls,
+  loadOrgData, saveShows, deleteShows, savePeople, deletePeople,
+  scheduleSignUp, scheduleWithdraw,
   saveInventory, deleteInventory, saveCueSheetForShow, saveSettings, subscribeToOrgChanges,
   uploadScriptPdf, downloadScriptPdf, deleteScriptPdf,
 } from './persistence.js';
@@ -28,7 +29,7 @@ import { loadMyPermissions } from './permissions.js';
 // ---------------------------------------------------------------------------
 // PERSISTENCE — two stores, doing two different jobs.
 //
-// Shared production data (shows, rosters, calls, inventory, cue sheets,
+// Shared production data (shows, rosters, inventory, cue sheets,
 // settings) lives in Supabase — a real Postgres database, shared by every
 // signed-in member of the org, with row-level security so one company's
 // data is never visible to another's (see supabase/schema.sql). That's
@@ -212,7 +213,6 @@ import { ShowCard, GetStarted, EditShowForm, NewShowForm } from './ProductionBoa
 import { ScriptModule } from './Script.jsx';
 import { ScenesModule } from './Scenes.jsx';
 import { TaxonomyEditor, SettingsModule } from './Settings.jsx';
-import { CallsModule } from './Calls.jsx';
 import { CrewModule } from './Crew.jsx';
 import { ActorsModule, StaffModule, MusiciansModule } from './People.jsx';
 import { SetModule } from './Set.jsx';
@@ -240,8 +240,6 @@ import {
   TODAY,
   seedShows,
   MILESTONE_PRESETS,
-  MILESTONE_CALL_TEMPLATES,
-  generateCallsForSchedule,
   INITIAL_DEPARTMENTS,
   INITIAL_DEPARTMENT_ORDER,
   seedCrew,
@@ -267,7 +265,6 @@ import {
   rosterForType,
   setterForType,
   defaultAssignmentFields,
-  seedCalls,
   seedInventory,
   cueDepartments,
   stockDepartments,
@@ -277,6 +274,7 @@ import {
   isDuplicateCue,
   nextCueNumber,
   seedCueSheets,
+  absorbLegacyCalls,
   seedVenues,
   seedLocations,
   seedInstruments,
@@ -287,7 +285,6 @@ import {
   daysUntil,
   formatShortDate,
   nextMilestone,
-  formatTime12h,
   parseTime12hTo24h,
   addMinutesToTime,
   formatDuration,
@@ -318,7 +315,7 @@ import {
 // sidebar builds its own list with labels and icons from the same ids.
 const SECTION_IDS = [
   'dashboard', 'schedule', 'scenes', 'characters', 'crew', 'actors', 'musicians', 'staff',
-  'choreography', 'costumes', 'props', 'calls', 'audio', 'inventory', 'set',
+  'choreography', 'costumes', 'props', 'audio', 'inventory', 'set',
   'runofshow', 'script', 'links', 'settings',
 ];
 
@@ -419,7 +416,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [crew, setCrew] = useState(seedCrew);
-  const [calls, setCalls] = useState(seedCalls);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [actors, setActors] = useState(seedActors);
   const [currentActorId, setCurrentActorId] = useState(null);
@@ -510,7 +506,7 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
 
   const [hydrated, setHydrated] = useState(false);
   // True for the render(s) produced by the realtime refetch replacing shows/
-  // crew/actors/staff/musicians/calls/inventory in one shot. Read by every
+  // crew/actors/staff/musicians/inventory in one shot. Read by every
   // useSyncedCollection below so that a server-driven replacement can never
   // be diffed against and turned into a delete. See useSyncedCollection.
   const remoteSyncRef = useRef(false);
@@ -529,12 +525,16 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
       try {
         const data = await loadOrgData(orgId);
         if (cancelled) return;
-        setShows(data.shows);
+        // Calls used to be their own table. Anything still there is folded
+        // into the schedule entry it belongs to on read, so a company that has
+        // not run migration 22 yet still sees its callboard — in the schedule,
+        // where it now lives. Idempotent: once 22 has run, data.calls is empty
+        // and this is a no-op.
+        setShows(absorbLegacyCalls(data.shows, data.calls));
         setCrew(data.crew);
         setActors(data.actors);
         setStaff(data.staff);
         setMusicians(data.musicians);
-        setCalls(data.calls);
         setInventory(data.inventory);
         setCueSheets(data.cueSheets);
         setVenues(data.settings.venues.length ? data.settings.venues : seedVenues);
@@ -620,16 +620,15 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     const refetch = () => {
       loadOrgData(orgId)
         .then((data) => {
-          // Set before any of the seven setX calls below, so every
+          // Set before any of the six setX calls below, so every
           // useSyncedCollection sees it on the render this produces and
           // treats the replacement as a resync, never a delete.
           remoteSyncRef.current = true;
-          setShows(data.shows);
+          setShows(absorbLegacyCalls(data.shows, data.calls));
           setCrew(data.crew);
           setActors(data.actors);
           setStaff(data.staff);
           setMusicians(data.musicians);
-          setCalls(data.calls);
           setInventory(data.inventory);
           setCueSheets(data.cueSheets);
         })
@@ -687,15 +686,14 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   useSyncedCollection(hydrated, actors, (p) => p.id, (items) => savePeople('actor', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
   useSyncedCollection(hydrated, staff, (p) => p.id, (items) => savePeople('staff', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
   useSyncedCollection(hydrated, musicians, (p) => p.id, (items) => savePeople('musician', items, orgId), deletePeople, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
-  useSyncedCollection(hydrated, calls, (c) => c.id, (items) => saveCalls(items, orgId), deleteCalls, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
   useSyncedCollection(hydrated, inventory, (i) => i.id, (items) => saveInventory(items, orgId), deleteInventory, setLastSavedAt, setPersistenceError, reportDenied, remoteSyncRef);
-  // Runs after all seven hooks above on the same render (hook effects fire in
+  // Runs after all six hooks above on the same render (hook effects fire in
   // declaration order), so by the time this clears the flag every one of them
   // has already seen it and resynced instead of diffing. Ordinary local edits
   // never touch this ref at all — it only ever gets set by the refetch above.
   useEffect(() => {
     remoteSyncRef.current = false;
-  }, [shows, crew, actors, staff, musicians, calls, inventory]);
+  }, [shows, crew, actors, staff, musicians, inventory]);
 
   // Cue sheets: keyed by show, replaced wholesale per show on change —
   // simpler and safe since only one department is ever editing a given
@@ -733,53 +731,44 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   ]);
 
 
-  // The schedule is the source of truth. Editing a date updates the call
-  // that was generated from it; removing a date retires that call (and
-  // frees any gear that had been pulled specifically for it); adding a date
-  // generates a fresh open call the same way show creation does.
+  // The schedule is the source of truth, and now the only record — Calls was a
+  // second table describing the same events, kept loosely in sync by matching
+  // the entry's label against a template. Editing an entry is just editing the
+  // show.
   function updateShowSchedule(showId, newSchedule) {
-    const show = shows.find((s) => s.id === showId);
-    if (!show) return;
-
     setShows((prev) => prev.map((s) => (s.id === showId ? { ...s, schedule: newSchedule } : s)));
+  }
 
-    const keptIds = new Set(newSchedule.map((item) => `call-${item.id}`));
-    const removedCallIds = new Set(
-      calls.filter((c) => c.showId === showId && c.id.startsWith('call-') && !keptIds.has(c.id)).map((c) => c.id)
+  // Sign-ups are the one schedule write a person without a schedule grant is
+  // allowed to make, so they go through a security definer RPC rather than the
+  // ordinary show_items path (migration 24). The RPC returns the updated
+  // entry; applying it via remoteSyncRef is what stops the autosave hook from
+  // turning round and trying to re-save a row this user cannot write, which
+  // would fail RLS and toast at somebody who did nothing wrong.
+  //
+  // Errors are rethrown rather than swallowed: the Schedule module shows them
+  // inline next to the button that caused them, which the debounced autosave
+  // could never do.
+  function applyScheduleEntry(showId, entryData) {
+    if (!entryData) return;
+    remoteSyncRef.current = true;
+    setShows((prev) =>
+      prev.map((s) =>
+        s.id !== showId
+          ? s
+          : { ...s, schedule: (s.schedule || []).map((e) => (e.id === entryData.id ? entryData : e)) }
+      )
     );
+  }
 
-    setCalls((prev) => {
-      let next = prev.filter((c) => !removedCallIds.has(c.id));
-      newSchedule.forEach((item) => {
-        if (!item.date) return;
-        const callId = `call-${item.id}`;
-        const idx = next.findIndex((c) => c.id === callId);
-        if (idx >= 0) {
-          next[idx] = { ...next[idx], date: item.date, time: item.time ? formatTime12h(item.time) : next[idx].time };
-        } else {
-          const template = MILESTONE_CALL_TEMPLATES[item.label];
-          if (template) {
-            next = [
-              ...next,
-              {
-                id: callId,
-                showId,
-                date: item.date,
-                time: item.time ? formatTime12h(item.time) : template.time,
-                label: template.label,
-                location: show.venue,
-                slots: template.slots.map((s, i) => ({ id: `${item.id}-slot-${i}`, personType: s.personType, role: s.role, filledBy: null, attendance: 'pending' })),
-              },
-            ];
-          }
-        }
-      });
-      return next;
-    });
+  async function handleSignUp(showId, entryId, slotId, personId, from, to) {
+    const updated = await scheduleSignUp(orgId, showId, entryId, slotId, personId, from, to);
+    applyScheduleEntry(showId, updated);
+  }
 
-    if (removedCallIds.size > 0) {
-      setInventory((prev) => prev.map((i) => (removedCallIds.has(i.callId) ? { ...i, callId: null } : i)));
-    }
+  async function handleWithdraw(showId, entryId, slotId, signupId) {
+    const updated = await scheduleWithdraw(orgId, showId, entryId, slotId, signupId);
+    applyScheduleEntry(showId, updated);
   }
 
   const filtered = useMemo(() => {
@@ -831,12 +820,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           title: `${(currentShow.props || []).length} Prop Need${(currentShow.props || []).length === 1 ? '' : 's'} Logged`,
         }
       : { eyebrow: 'PROPS', title: 'No Show Selected' },
-    calls: currentShow
-      ? {
-          eyebrow: 'CALLBOARD',
-          title: `${calls.filter((c) => c.showId === currentShowId).length} Call${calls.filter((c) => c.showId === currentShowId).length === 1 ? '' : 's'} for ${currentShow.title}`,
-        }
-      : { eyebrow: 'CALLBOARD', title: 'No Show Selected' },
     audio: currentShow
       ? {
           eyebrow: `AUDIO PROFILE — ${currentShow.title.toUpperCase()}`,
@@ -970,16 +953,15 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
               onGo={setActive}
               hasShow={!!currentShow}
               steps={[
-                { label: 'Set up the company', target: 'settings', done: venues.length > 0, note: 'Venues, storage locations, instruments, and the department, cast and cue vocabularies every picker pulls from.' },
+                { label: 'Set up the company', target: 'settings', done: venues.length > 0, note: 'Places and their addresses, storage locations, instruments, and the department, cast and cue vocabularies every picker pulls from.' },
                 { label: 'Build your company rosters', target: 'crew', done: crew.length + actors.length + musicians.length + staff.length > 0, note: 'Crew, actors, musicians and staff live at company level once — you assign them to individual shows later.' },
                 { label: 'Create the production', target: 'dashboard', done: shows.length > 0, note: 'New production, with its venue and opening date. Everything below hangs off the show you are working on.' },
                 { label: 'Enter the scene list', target: 'scenes', done: (currentShow?.acts?.length || 0) > 0, note: 'Acts, scenes and musical numbers. Choreography, costumes, props and cues all reference this, so it comes first.' },
                 { label: 'Build the character list', target: 'characters', done: (currentShow?.characters?.length || 0) > 0, note: 'The roles in the show, ticked into the scenes they appear in. Actors get cast into these, and costumes and props hang off them, so it precedes casting.' },
-                { label: 'Lay out the schedule', target: 'schedule', done: (currentShow?.schedule?.length || 0) > 0, note: 'Load-in, rehearsals, tech week and strike. Calls are generated from these dates, so schedule before you post calls.' },
-                { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Cast actors into characters; crew, band and staff into positions from Settings. The audio plot and callboard both read these.' },
+                { label: 'Lay out the schedule', target: 'schedule', done: (currentShow?.schedule?.length || 0) > 0, note: 'Load-in, rehearsals, tech week, performances and strike. Each entry is also its call sheet — where it is, who is called, which positions still need bodies, and what gear comes out.' },
+                { label: 'Assign people to the show', target: 'crew', done: [...crew, ...actors, ...musicians, ...staff].some((p) => (p.assignments || []).some((a) => a.showId === currentShow?.id)), note: 'Cast actors into characters; crew, band and staff into positions from Settings. The audio plot and the schedule both read these.' },
                 { label: 'Work the design lists', target: 'costumes', done: ((currentShow?.costumes?.length || 0) + (currentShow?.props?.length || 0) + (currentShow?.setPieces?.length || 0)) > 0, note: 'Costumes, props and set pieces — tied to actor and scene, tracked from needs-building through acquired.' },
                 { label: 'Stock and pull inventory', target: 'inventory', done: inventory.length > 0, note: 'What the shop owns, what it cost, and which show has it. Tech-week overlaps between productions get flagged.' },
-                { label: 'Post calls to the callboard', target: 'calls', done: calls.some((c) => c.showId === currentShow?.id), note: 'Who is called when, which scenes are being worked, what gear comes out, and who actually turned up.' },
                 { label: 'Upload the script', target: 'script', done: !!currentShow?.script, note: 'Then click the page where each cue actually falls, and export an annotated copy.' },
                 { label: 'Build the run of show', target: 'runofshow', done: (cueSheets?.[currentShow?.id]?.length || 0) > 0, note: 'The calling script cue by cue, numbered per department — LX 1 and SND 1 are independent.' },
                 { label: 'Check the audio plot', target: 'audio', done: false, note: 'Mic, DI and playback channels, generated from your cast and band assignments. Read it last, once the rest is in.' },
@@ -1036,8 +1018,6 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
                 venues={venues}
                 onAdd={(show) => {
                   setShows((prev) => [show, ...prev]);
-                  const generated = generateCallsForSchedule(show);
-                  if (generated.length > 0) setCalls((prev) => [...prev, ...generated]);
                   setShowForm(false);
                 }}
                 onClose={() => setShowForm(false)}
@@ -1094,9 +1074,21 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
             <ScheduleModule
               show={currentShow}
               rosters={{ crew, actors, staff, musicians }}
+              venues={venues}
+              inventory={inventory}
+              setInventory={setInventory}
+              slotOptions={{
+                crew: positions.crew,
+                staff: positions.staff,
+                musician: positions.musician,
+                actor: (currentShow?.characters || []).map((c) => c.name),
+              }}
               onScheduleChange={updateShowSchedule}
+              onSignUpRequest={handleSignUp}
+              onWithdrawRequest={handleWithdraw}
               view={scheduleView}
               myUserId={authUserId}
+              canEdit={sectionWritable}
               CAST_TYPES={castTypes}
               CAST_TYPE_ORDER={castTypeOrder}
               DEPARTMENTS={departments}
@@ -1150,35 +1142,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="prop needs" />
           ))}
-        {active === 'calls' &&
-          (currentShow ? (
-            <CallsModule
-              show={currentShow}
-              venues={venues}
-              calls={calls}
-              setCalls={setCalls}
-              rosters={{ crew, setCrew, actors, setActors, staff, setStaff, musicians, setMusicians }}
-              currentIds={{ crew: currentUserId, actor: currentActorId, staff: currentStaffId, musician: currentMusicianId }}
-              inventory={inventory}
-              setInventory={setInventory}
-              setShows={setShows}
-              slotOptions={{
-                crew: positions.crew,
-                staff: positions.staff,
-                musician: positions.musician,
-                actor: (currentShow?.characters || []).map((c) => c.name),
-              }}
-            />
-          ) : (
-            <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="callboard" />
-          ))}
         {active === 'audio' &&
           (currentShow ? (
             <AudioModule show={currentShow} actors={actors} musicians={musicians} setShows={setShows} CAST_TYPE_ORDER={castTypeOrder} MUSIC_SECTIONS={departments} />
           ) : (
             <NoShowSelected shows={shows} setCurrentShowId={setCurrentShowId} label="audio profile" />
           ))}
-        {active === 'inventory' && <InventoryModule show={currentShow} shows={shows} calls={calls} inventory={inventory} setInventory={setInventory} locations={locations} INVENTORY_CATEGORIES={inventoryCategories} INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder} />}
+        {active === 'inventory' && <InventoryModule show={currentShow} shows={shows} inventory={inventory} setInventory={setInventory} locations={locations} INVENTORY_CATEGORIES={inventoryCategories} INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder} />}
         {active === 'set' &&
           (currentShow ? (
             <SetModule show={currentShow} inventory={inventory} setInventory={setInventory} locations={locations} setShows={setShows} INVENTORY_CATEGORIES={inventoryCategories} INVENTORY_CATEGORY_ORDER={inventoryCategoryOrder} orgId={orgId} />

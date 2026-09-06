@@ -464,109 +464,73 @@ export const seedShows = [
 
 export const MILESTONE_PRESETS = ['Load-in', 'Focus', 'Q2Q', 'Tech Rehearsal', 'Dress Rehearsal', 'Opening', 'Strike'];
 
-// Each key date on a production's schedule seeds a real call sheet, staffed
-// with the roles that milestone typically needs — all open until someone
-// signs up.
-export const MILESTONE_CALL_TEMPLATES = {
-  'Load-in': {
-    time: '9:00 AM',
-    label: 'Load-in',
-    slots: [
-      { personType: 'crew', role: 'Charge Scenic' },
-      { personType: 'crew', role: 'Carpenter' },
-      { personType: 'crew', role: 'Carpenter' },
-      { personType: 'crew', role: 'Electrician' },
-      { personType: 'crew', role: 'General Hand' },
-      { personType: 'crew', role: 'General Hand' },
-    ],
-  },
-  Focus: {
-    time: '9:00 AM',
-    label: 'Focus',
-    slots: [
-      { personType: 'crew', role: 'Master Electrician' },
-      { personType: 'crew', role: 'Electrician' },
-      { personType: 'crew', role: 'General Hand' },
-    ],
-  },
-  Q2Q: {
-    time: '9:00 AM',
-    label: 'Cue-to-Cue',
-    slots: [
-      { personType: 'crew', role: 'Stage Manager' },
-      { personType: 'crew', role: 'Technical Director' },
-      { personType: 'crew', role: 'Board Op' },
-      { personType: 'crew', role: 'A2' },
-      { personType: 'crew', role: 'General Hand' },
-    ],
-  },
-  'Tech Rehearsal': {
-    time: '6:00 PM',
-    label: 'Tech Rehearsal',
-    slots: [
-      { personType: 'crew', role: 'Stage Manager' },
-      { personType: 'crew', role: 'Technical Director' },
-      { personType: 'crew', role: 'Board Op' },
-      { personType: 'crew', role: 'A2' },
-      { personType: 'crew', role: 'Wardrobe Supervisor' },
-      { personType: 'crew', role: 'General Hand' },
-    ],
-  },
-  'Dress Rehearsal': {
-    time: '6:00 PM',
-    label: 'Dress Rehearsal',
-    slots: [
-      { personType: 'crew', role: 'Stage Manager' },
-      { personType: 'crew', role: 'Board Op' },
-      { personType: 'crew', role: 'A2' },
-      { personType: 'crew', role: 'Wardrobe Supervisor' },
-      { personType: 'crew', role: 'Props Master' },
-      { personType: 'crew', role: 'General Hand' },
-    ],
-  },
-  Opening: {
-    time: '6:30 PM',
-    label: 'Half Hour',
-    slots: [
-      { personType: 'crew', role: 'Stage Manager' },
-      { personType: 'crew', role: 'Board Op' },
-      { personType: 'crew', role: 'A2' },
-      { personType: 'crew', role: 'General Hand' },
-      { personType: 'actor', role: 'Full Cast Call' },
-      { personType: 'musician', role: 'Downbeat / Pit Call' },
-    ],
-  },
-  Strike: {
-    time: '10:30 PM',
-    label: 'Strike',
-    slots: [
-      { personType: 'crew', role: 'Charge Scenic' },
-      { personType: 'crew', role: 'Carpenter' },
-      { personType: 'crew', role: 'Carpenter' },
-      { personType: 'crew', role: 'Electrician' },
-      { personType: 'crew', role: 'General Hand' },
-      { personType: 'crew', role: 'General Hand' },
-      { personType: 'crew', role: 'General Hand' },
-    ],
-  },
+// Each key date on a production's schedule seeds the crew it typically needs.
+//
+// These are SLOTS now, not a separate call sheet. A slot is a requirement —
+// `needed` people holding this role for the length of the call — rather than a
+// row per body, so "six general hands" is one line instead of six identical
+// ones you have to count by eye.
+export const MILESTONE_SLOT_TEMPLATES = {
+  'Load-in': [
+    { personType: 'crew', role: 'Charge Scenic', needed: 1 },
+    { personType: 'crew', role: 'Carpenter', needed: 2 },
+    { personType: 'crew', role: 'Electrician', needed: 1 },
+    { personType: 'crew', role: 'General Hand', needed: 2 },
+  ],
+  Focus: [
+    { personType: 'crew', role: 'Master Electrician', needed: 1 },
+    { personType: 'crew', role: 'Electrician', needed: 1 },
+    { personType: 'crew', role: 'General Hand', needed: 1 },
+  ],
+  Q2Q: [
+    { personType: 'crew', role: 'Stage Manager', needed: 1 },
+    { personType: 'crew', role: 'Technical Director', needed: 1 },
+    { personType: 'crew', role: 'Board Op', needed: 1 },
+    { personType: 'crew', role: 'A2', needed: 1 },
+    { personType: 'crew', role: 'General Hand', needed: 1 },
+  ],
+  'Tech Rehearsal': [
+    { personType: 'crew', role: 'Stage Manager', needed: 1 },
+    { personType: 'crew', role: 'Technical Director', needed: 1 },
+    { personType: 'crew', role: 'Board Op', needed: 1 },
+    { personType: 'crew', role: 'A2', needed: 1 },
+    { personType: 'crew', role: 'Wardrobe Supervisor', needed: 1 },
+    { personType: 'crew', role: 'General Hand', needed: 1 },
+  ],
+  'Dress Rehearsal': [
+    { personType: 'crew', role: 'Stage Manager', needed: 1 },
+    { personType: 'crew', role: 'Board Op', needed: 1 },
+    { personType: 'crew', role: 'A2', needed: 1 },
+    { personType: 'crew', role: 'Wardrobe Supervisor', needed: 1 },
+    { personType: 'crew', role: 'General Hand', needed: 1 },
+  ],
+  Opening: [
+    { personType: 'crew', role: 'Stage Manager', needed: 1 },
+    { personType: 'crew', role: 'Board Op', needed: 1 },
+    { personType: 'crew', role: 'A2', needed: 1 },
+    { personType: 'crew', role: 'Wardrobe Supervisor', needed: 1 },
+  ],
+  Strike: [
+    { personType: 'crew', role: 'Charge Scenic', needed: 1 },
+    { personType: 'crew', role: 'Carpenter', needed: 2 },
+    { personType: 'crew', role: 'Electrician', needed: 1 },
+    { personType: 'crew', role: 'General Hand', needed: 3 },
+  ],
 };
 
-export function generateCallsForSchedule(show) {
-  return (show.schedule || [])
-    .map((item) => {
-      const template = MILESTONE_CALL_TEMPLATES[item.label];
-      if (!template) return null;
-      return {
-        id: `call-${item.id}`,
-        showId: show.id,
-        date: item.date,
-        time: item.time ? formatTime12h(item.time) : template.time,
-        label: template.label,
-        location: show.venue,
-        slots: template.slots.map((s, i) => ({ id: `${item.id}-slot-${i}`, personType: s.personType, role: s.role, filledBy: null, attendance: 'pending' })),
-      };
-    })
-    .filter(Boolean);
+// The slots a milestone label suggests, ready to drop onto an entry. Returns
+// an empty list for a label with no template — a schedule entry called
+// "Put-in" is not a mistake, it just has no house opinion about staffing.
+export function milestoneSlotsFor(label, entryId) {
+  const template = MILESTONE_SLOT_TEMPLATES[label];
+  if (!template) return [];
+  return template.map((t, i) => ({
+    id: `${entryId}-slot-${i}`,
+    personType: t.personType,
+    role: t.role,
+    needed: t.needed,
+    signups: [],
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -886,68 +850,6 @@ export function defaultAssignmentFields(type, slotRole) {
   return {};
 }
 
-export const handwrittenCalls = [
-  {
-    id: 'call1',
-    showId: 's1',
-    date: TODAY_STR,
-    time: '9:00 AM',
-    label: 'Focus & Cue-to-Cue',
-    location: 'Mainstage',
-    sceneIds: ['sc-s1-1a'],
-    slots: [
-      { id: 'call1-s1', personType: 'crew', role: 'Master Electrician', filledBy: 'c1', attendance: 'present' },
-      { id: 'call1-s2', personType: 'crew', role: 'Electrician', filledBy: 'c2', attendance: 'present' },
-      { id: 'call1-s3', personType: 'crew', role: 'Board Op', filledBy: 'c3', attendance: 'absent' },
-      { id: 'call1-s4', personType: 'crew', role: 'Technical Director', filledBy: 'c4', attendance: 'present' },
-      { id: 'call1-s5', personType: 'crew', role: 'Props Master', filledBy: 'c10', attendance: 'present' },
-      { id: 'call1-s6', personType: 'crew', role: 'General Hand', filledBy: null, attendance: 'pending' },
-      { id: 'call1-s7', personType: 'crew', role: 'General Hand', filledBy: null, attendance: 'pending' },
-    ],
-  },
-  {
-    id: 'call2',
-    showId: 's3',
-    date: TODAY_STR,
-    time: '1:00 PM',
-    label: 'Deck & Paint Call',
-    location: 'Black Box',
-    slots: [
-      { id: 'call2-s1', personType: 'crew', role: 'Charge Scenic', filledBy: 'c6', attendance: 'pending' },
-      { id: 'call2-s2', personType: 'crew', role: 'Carpenter', filledBy: 'c7', attendance: 'pending' },
-      { id: 'call2-s3', personType: 'crew', role: 'Technical Director', filledBy: 'c4', attendance: 'pending' },
-      { id: 'call2-s4', personType: 'crew', role: 'Carpenter', filledBy: null, attendance: 'pending' },
-      { id: 'call2-s5', personType: 'crew', role: 'General Hand', filledBy: null, attendance: 'pending' },
-    ],
-  },
-  {
-    id: 'call3',
-    showId: 's2',
-    date: TODAY_STR,
-    time: '6:30 PM',
-    label: 'Half Hour',
-    location: 'Mainstage',
-    slots: [
-      { id: 'call3-s1', personType: 'crew', role: 'Board Op', filledBy: 'c3', attendance: 'pending' },
-      { id: 'call3-s2', personType: 'crew', role: 'Technical Director', filledBy: 'c4', attendance: 'pending' },
-      { id: 'call3-s3', personType: 'crew', role: 'Stage Manager', filledBy: 'c5', attendance: 'pending' },
-      { id: 'call3-s4', personType: 'crew', role: 'A2', filledBy: 'c8', attendance: 'pending' },
-      { id: 'call3-s5', personType: 'crew', role: 'Wardrobe Supervisor', filledBy: 'c9', attendance: 'pending' },
-      { id: 'call3-s6', personType: 'crew', role: 'General Hand', filledBy: null, attendance: 'pending' },
-      { id: 'call3-s7', personType: 'actor', role: 'Cassie — Lead', filledBy: 'a7', attendance: 'pending' },
-      { id: 'call3-s8', personType: 'actor', role: 'Ensemble Call', filledBy: null, attendance: 'pending' },
-      { id: 'call3-s9', personType: 'musician', role: 'Music Director / Downbeat', filledBy: 'm1', attendance: 'pending' },
-    ],
-  },
-];
-
-// Every future key date on a production's schedule already has an open call
-// sheet waiting — generated the same way a newly added show's schedule
-// would be.
-export const generatedCalls = seedShows.flatMap((s) => generateCallsForSchedule(s).filter((c) => c.date > TODAY_STR));
-
-export const seedCalls = [...handwrittenCalls, ...generatedCalls];
-
 // Inventory categories were the same seven departments under another name.
 // They are now `stock: true` on the department itself — see stockDepartments().
 
@@ -1114,7 +1016,11 @@ export const seedCueSheets = {
   ],
 };
 
-export const seedVenues = ['Mainstage', 'Black Box', 'Studio'];
+export const seedVenues = [
+  { name: 'Mainstage', address1: '1 Theatre Square', city: 'Passaic', state: 'NJ', zip: '07055', notes: 'Load-in via the alley door on the north side. Cast parking in the rear lot.' },
+  { name: 'Black Box', address1: '1 Theatre Square', address2: 'Lower level', city: 'Passaic', state: 'NJ', zip: '07055', notes: 'No freight access — everything comes down the stairs.' },
+  { name: 'Studio', address1: '44 Mill Street', city: 'Passaic', state: 'NJ', zip: '07055', notes: 'Rehearsal only. Street parking, metered until 6pm.' },
+];
 export const seedLocations = ['Electrics Cage', 'Sound Booth', 'Scene Shop', 'Rigging Loft', 'Props Storage', 'Costume Shop', 'Shop Stores'];
 export const seedInstruments = ['Music Director / Conductor', 'Piano 1', 'Piano 2', 'Violin', 'Viola', 'Cello', 'Bass', 'Guitar', 'Drums/Percussion', 'Reed 1', 'Reed 2', 'Reed 3', 'Trumpet', 'Trombone', 'French Horn', 'Vocal Captain', 'Vocals'];
 
@@ -1278,3 +1184,307 @@ export const UNIT_STATUS_META = {
   repaired: { label: 'Repaired', color: COLOR.green },
   retired: { label: 'Retired', color: COLOR.textFaint },
 };
+
+// ---------------------------------------------------------------------------
+// PLACES — a venue is an object now, because a schedule entry that names a
+// room should be able to say how to get to it.
+//
+// It used to be a bare string, and `shows.venue` and every imported schedule
+// row still hold that string. So the NAME is the key, not a generated id:
+// nothing already written has to be rewritten, and a venue that survives only
+// as a name on an old row still resolves to something displayable. The cost is
+// that renaming a place in Settings orphans the rows pointing at it, which is
+// why the Places editor offers to carry the rename through.
+// ---------------------------------------------------------------------------
+export function normalizeVenue(v) {
+  if (typeof v === 'string') {
+    const name = v.trim();
+    return name ? { name, address1: '', address2: '', city: '', state: '', zip: '', notes: '' } : null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const name = String(v.name || '').trim();
+  if (!name) return null;
+  return {
+    name,
+    address1: v.address1 || '',
+    address2: v.address2 || '',
+    city: v.city || '',
+    state: v.state || '',
+    zip: v.zip || '',
+    notes: v.notes || '',
+  };
+}
+
+export function venueList(venues) {
+  return (venues || []).map(normalizeVenue).filter(Boolean);
+}
+
+export function venueNames(venues) {
+  return venueList(venues).map((v) => v.name);
+}
+
+export function venueByName(venues, name) {
+  if (!name) return null;
+  const want = String(name).trim().toLowerCase();
+  return venueList(venues).find((v) => v.name.trim().toLowerCase() === want) || null;
+}
+
+export function hasAddress(venue) {
+  return !!(venue && (venue.address1 || venue.city || venue.state || venue.zip));
+}
+
+// One line, the way you would read it out over the phone.
+export function venueAddressLine(venue) {
+  if (!venue) return '';
+  const street = [venue.address1, venue.address2].filter(Boolean).join(', ');
+  const region = [venue.city, [venue.state, venue.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [street, region].filter(Boolean).join(', ');
+}
+
+// A maps link is the only thing anyone actually does with an address at 7am on
+// a load-in day.
+export function venueMapsUrl(venue) {
+  const line = venueAddressLine(venue);
+  if (!line) return '';
+  return `https://maps.google.com/?q=${encodeURIComponent(`${venue.name}, ${line}`)}`;
+}
+
+// ---------------------------------------------------------------------------
+// SCHEDULE ENTRIES — the shape after Calls folded in, and how to read the two
+// shapes that exist on disk.
+//
+// `attendance` named two unrelated things: who is CALLED (roster ids, on the
+// schedule entry) and whether someone TURNED UP (present/absent, on a call
+// slot). After the merge both live on the same object, so they are now
+// `called` and `roll`. Old rows keep working — normalizeEntry reads either,
+// and is idempotent, so running it over already-migrated data is harmless.
+//
+// A call slot's `filledBy` was one person for the whole call. That is exactly
+// a sign-up with no times on it, so it converts without inventing anything.
+// ---------------------------------------------------------------------------
+export const ROSTER_KEYS = ['crew', 'actors', 'musicians', 'staff'];
+
+export function emptyCalled() {
+  return { crew: [], actors: [], musicians: [], staff: [] };
+}
+
+export function normalizeSlot(slot, index) {
+  const id = slot.id || `slot-${index}`;
+  if (Array.isArray(slot.signups)) {
+    return {
+      id,
+      personType: slot.personType || 'crew',
+      role: slot.role || '',
+      needed: Math.max(0, Number(slot.needed) || 0),
+      // Spread first: the sign-up RPC (migration 24) stamps `addedBy` on
+      // sign-ups entered on somebody else's behalf, and rebuilding this object
+      // from a fixed field list would drop it on the very next render — the
+      // server would hold the record and the screen would never show it.
+      signups: slot.signups
+        .filter((s) => s && s.personId)
+        .map((s, i) => ({ ...s, id: s.id || `${id}-su${i}`, personId: s.personId, from: s.from || '', to: s.to || '' })),
+    };
+  }
+  return {
+    id,
+    personType: slot.personType || 'crew',
+    role: slot.role || '',
+    needed: 1,
+    signups: slot.filledBy ? [{ id: `${id}-su0`, personId: slot.filledBy, from: '', to: '' }] : [],
+  };
+}
+
+export function normalizeEntry(entry) {
+  if (!entry) return null;
+  const calledSrc = entry.called || entry.attendance || {};
+  const called = emptyCalled();
+  ROSTER_KEYS.forEach((k) => {
+    called[k] = [...(calledSrc[k] || [])];
+  });
+
+  const roll = { ...(entry.roll || {}) };
+  // Legacy per-slot attendance was a roll mark keyed by slot; re-key it to the
+  // person, since one person can hold two slots and is still one body to mark.
+  if (!entry.roll) {
+    (entry.slots || []).forEach((slot) => {
+      if (slot.filledBy && slot.attendance && slot.attendance !== 'pending') roll[slot.filledBy] = slot.attendance;
+    });
+  }
+
+  return {
+    ...entry,
+    called,
+    roll,
+    location: entry.location || '',
+    sceneIds: [...(entry.sceneIds || [])],
+    breaks: [...(entry.breaks || [])],
+    openSignup: entry.openSignup === undefined ? false : !!entry.openSignup,
+    slots: (entry.slots || []).map(normalizeSlot),
+    attendance: undefined,
+  };
+}
+
+export function normalizeSchedule(schedule) {
+  return (schedule || []).map(normalizeEntry).filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// COVERAGE — the point of the merge.
+//
+// A slot is not a seat one person fills, it is a requirement: `needed` people
+// holding this role for the length of the call. Two half-day sign-ups cover
+// one needed body as well as one all-day sign-up does, so the answer is not a
+// headcount but a set of time segments, each with what it has and what it
+// wants. This is what lets nine people sign up for a call that needs six.
+// ---------------------------------------------------------------------------
+export function toMinutes(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = String(hhmm).split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+export function fromMinutes(total) {
+  const t = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+// The window a call actually occupies: start, through duration plus breaks. A
+// call running past midnight counts past 1440 rather than wrapping, so every
+// comparison downstream stays ordinary arithmetic.
+export function entryWindow(entry) {
+  const start = toMinutes(entry.time);
+  if (start === null) return null;
+  const breaks = (entry.breaks || []).reduce((s, b) => s + (Number(b.durationMinutes) || 0), 0);
+  return { start, end: start + (Number(entry.durationMinutes) || 0) + breaks };
+}
+
+// A sign-up with no times of its own means "the whole call" — the common case,
+// and the one that must not require typing two clock times to express.
+export function signupSpan(signup, win) {
+  const from = toMinutes(signup.from);
+  const to = toMinutes(signup.to);
+  let a = from === null ? win.start : from;
+  let b = to === null ? win.end : to;
+  if (win.end > 1440 && a < win.start) a += 1440;
+  if (win.end > 1440 && b <= a) b += 1440;
+  a = Math.max(a, win.start);
+  b = Math.min(b, win.end);
+  return b > a ? { from: a, to: b } : null;
+}
+
+export function slotCoverage(entry, slot) {
+  const win = entryWindow(entry);
+  if (!win) return [];
+  const need = Math.max(0, Number(slot.needed) || 0);
+  const spans = (slot.signups || []).map((s) => signupSpan(s, win)).filter(Boolean);
+
+  const marks = new Set([win.start, win.end]);
+  spans.forEach((s) => {
+    marks.add(s.from);
+    marks.add(s.to);
+  });
+  const points = [...marks].sort((a, b) => a - b);
+
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const from = points[i];
+    const to = points[i + 1];
+    if (to <= from) continue;
+    segments.push({ from, to, have: spans.filter((s) => s.from <= from && s.to >= to).length, need });
+  }
+
+  // Adjacent segments with the same headcount are one stretch, not two.
+  // Without this a call with three staggered sign-ups reads as five bars
+  // saying the same thing, which is how a real shortfall gets lost.
+  const merged = [];
+  segments.forEach((seg) => {
+    const last = merged[merged.length - 1];
+    if (last && last.have === seg.have && last.to === seg.from) last.to = seg.to;
+    else merged.push({ ...seg });
+  });
+  return merged;
+}
+
+export function slotShortfall(entry, slot) {
+  return slotCoverage(entry, slot).filter((s) => s.have < s.need);
+}
+
+export function isFullyCovered(entry, slot) {
+  return slotShortfall(entry, slot).length === 0;
+}
+
+// Everyone attached to this entry, called or signed up. Roll is taken against
+// this rather than against slots: one person holding two slots is still one
+// person to mark present.
+export function attachedPersonIds(entry) {
+  const ids = new Set();
+  const called = entry.called || entry.attendance || {};
+  ROSTER_KEYS.forEach((k) => (called[k] || []).forEach((id) => ids.add(id)));
+  (entry.slots || []).forEach((slot) => (slot.signups || []).forEach((s) => s.personId && ids.add(s.personId)));
+  return ids;
+}
+
+export const ROLL_STATUS = {
+  pending: { label: 'Pending', color: COLOR.textFaint },
+  present: { label: 'Present', color: COLOR.green },
+  late: { label: 'Late', color: COLOR.amber },
+  absent: { label: 'Absent', color: COLOR.slate },
+};
+export const ROLL_STATUS_ORDER = ['present', 'late', 'absent'];
+
+// ---------------------------------------------------------------------------
+// Folding legacy `calls` rows into the schedule entries they belong to.
+//
+// A generated call carried the id `call-<scheduleEntryId>`, so those match
+// exactly. Anything else was typed by hand on the callboard and has no
+// schedule entry behind it — it becomes an entry of its own rather than being
+// matched on date and time, because a call and a rehearsal that happen to
+// start at the same hour are not the same event, and guessing they are would
+// silently merge two days of work into one.
+//
+// Idempotent and safe on a project where migration 22 has already run: with no
+// calls to fold, it is normalizeSchedule and nothing else.
+// ---------------------------------------------------------------------------
+export function foldCallsIntoSchedule(schedule, calls) {
+  const entries = normalizeSchedule(schedule);
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const adopted = [];
+  const standalone = [];
+
+  (calls || []).forEach((call) => {
+    const targetId = String(call.id || '').startsWith('call-') ? String(call.id).slice(5) : null;
+    const target = targetId ? byId.get(targetId) : null;
+    if (target) {
+      const merged = normalizeEntry({ ...call, id: target.id });
+      target.slots = merged.slots;
+      target.sceneIds = merged.sceneIds.length ? merged.sceneIds : target.sceneIds;
+      target.location = target.location || merged.location;
+      target.roll = { ...merged.roll, ...target.roll };
+      adopted.push({ callId: call.id, entryId: target.id });
+    } else {
+      const entry = normalizeEntry({
+        label: call.label || 'Call',
+        date: call.date,
+        durationMinutes: 0,
+        notes: '',
+        ...call,
+        id: `sd-from-${call.id}`,
+        time: parseTime12hTo24h(call.time),
+      });
+      entries.push(entry);
+      standalone.push({ callId: call.id, entryId: entry.id, label: call.label });
+    }
+  });
+
+  return { entries, adopted, standalone };
+}
+
+// Same thing across every show at once, for the hydration path.
+export function absorbLegacyCalls(shows, calls) {
+  if (!calls || calls.length === 0) return (shows || []).map((s) => ({ ...s, schedule: normalizeSchedule(s.schedule) }));
+  return (shows || []).map((show) => ({
+    ...show,
+    schedule: foldCallsIntoSchedule(show.schedule, calls.filter((c) => c.showId === show.id)).entries,
+  }));
+}

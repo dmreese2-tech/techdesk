@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Check, Image as ImageIcon, Layers, Pencil, Plus, RotateCcw, Star, Upload, X } from 'lucide-react';
+import { Building2, Check, Image as ImageIcon, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { MembersPanel } from './Shell.jsx';
 import { PositionsPanel } from './Positions.jsx';
 import { PositionPermissionsPanel } from './PositionPermissions.jsx';
-import { byName, sortKeysByLabel, stockDepartments } from './shared.jsx';
+import { byName, hasAddress, sortKeysByLabel, stockDepartments, venueAddressLine, venueList, venueMapsUrl } from './shared.jsx';
 
 // SETTINGS — venues, storage locations, positions, and the two taxonomies that
 // feed the pickers elsewhere: departments and cast types.
@@ -614,6 +614,171 @@ function ChipEditor({ label, note, items, onRemove, value, setValue, onAdd, plac
   );
 }
 
+// ---------------------------------------------------------------------------
+// PLACES EDITOR — venues with addresses.
+//
+// A place used to be a bare string, which was fine while the only question was
+// "which stage". Once a schedule entry can name a place, the question becomes
+// "where do I drive to at 7am", and a name alone does not answer it.
+//
+// The NAME is still the key: `shows.venue` and every schedule entry store it
+// as text, so nothing already written has to be rewritten. The cost is that
+// renaming a place orphans the rows pointing at the old name, which is why the
+// rename below is a deliberate two-step with a warning rather than a text box
+// that quietly saves.
+// ---------------------------------------------------------------------------
+function PlacesEditor({ venues, setVenues, note }) {
+  const [expandedName, setExpandedName] = useState(null);
+  const [newName, setNewName] = useState('');
+
+  const places = venueList(venues).sort((a, b) => byName(a.name, b.name));
+
+  const inputStyle = {
+    background: COLOR.void,
+    border: `1px solid ${COLOR.line}`,
+    borderRadius: 3,
+    padding: '7px 9px',
+    color: COLOR.textPrimary,
+    fontSize: 12.5,
+    width: '100%',
+  };
+  const fieldLabel = { fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.06em', marginBottom: 4, display: 'block' };
+
+  function addPlace() {
+    const name = newName.trim();
+    if (!name) return;
+    if (places.some((p) => p.name.toLowerCase() === name.toLowerCase())) return;
+    setVenues([...venueList(venues), { name, address1: '', address2: '', city: '', state: '', zip: '', notes: '' }]);
+    setNewName('');
+    setExpandedName(name);
+  }
+  function updatePlace(name, field, value) {
+    setVenues(venueList(venues).map((p) => (p.name === name ? { ...p, [field]: value } : p)));
+  }
+  function removePlace(name) {
+    setVenues(venueList(venues).filter((p) => p.name !== name));
+    if (expandedName === name) setExpandedName(null);
+  }
+
+  return (
+    <div>
+      <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 10 }}>{note}</div>
+
+      {places.length === 0 && (
+        <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 10 }}>None yet.</div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+        {places.map((place) => {
+          const open = expandedName === place.name;
+          const line = venueAddressLine(place);
+          const maps = venueMapsUrl(place);
+          return (
+            <div key={place.name} style={{ border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setExpandedName(open ? null : place.name)}
+                  className="td-focusable"
+                  aria-expanded={open}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 160, textAlign: 'left' }}
+                >
+                  <MapPin size={12} color={hasAddress(place) ? COLOR.blueprint : COLOR.textFaint} strokeWidth={1.75} />
+                  <span className="td-body" style={{ fontSize: 13, color: COLOR.textPrimary, fontWeight: 500 }}>{place.name}</span>
+                  {!hasAddress(place) && (
+                    <span className="td-mono" style={{ fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.04em' }}>NO ADDRESS</span>
+                  )}
+                </button>
+                {line && !open && (
+                  <span className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, flexBasis: '100%' }}>{line}</span>
+                )}
+                <button
+                  onClick={() => removePlace(place.name)}
+                  className="td-focusable"
+                  style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }}
+                  aria-label={`Remove ${place.name}`}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {open && (
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+                    <div>
+                      <label className="td-mono" style={fieldLabel}>STREET</label>
+                      <input className="td-focusable" style={inputStyle} value={place.address1} onChange={(e) => updatePlace(place.name, 'address1', e.target.value)} placeholder="1 Theatre Square" />
+                    </div>
+                    <div>
+                      <label className="td-mono" style={fieldLabel}>SUITE / FLOOR / DOOR</label>
+                      <input className="td-focusable" style={inputStyle} value={place.address2} onChange={(e) => updatePlace(place.name, 'address2', e.target.value)} placeholder="Stage door, rear" />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 1fr', gap: 8 }}>
+                    <div>
+                      <label className="td-mono" style={fieldLabel}>CITY</label>
+                      <input className="td-focusable" style={inputStyle} value={place.city} onChange={(e) => updatePlace(place.name, 'city', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="td-mono" style={fieldLabel}>STATE</label>
+                      <input className="td-focusable" style={inputStyle} value={place.state} onChange={(e) => updatePlace(place.name, 'state', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="td-mono" style={fieldLabel}>ZIP</label>
+                      <input className="td-focusable" style={inputStyle} value={place.zip} onChange={(e) => updatePlace(place.name, 'zip', e.target.value)} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="td-mono" style={fieldLabel}>GETTING IN — PARKING, LOAD-IN DOOR, DOOR CODE</label>
+                    <textarea
+                      className="td-focusable"
+                      style={{ ...inputStyle, minHeight: 48, resize: 'vertical', fontFamily: "'Inter', sans-serif" }}
+                      value={place.notes}
+                      onChange={(e) => updatePlace(place.name, 'notes', e.target.value)}
+                      placeholder="Load-in via the alley door on the north side. Cast parking in the rear lot."
+                    />
+                    <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, marginTop: 4 }}>
+                      Shown on every schedule entry at this place.
+                    </div>
+                  </div>
+                  {maps && (
+                    <a href={maps} target="_blank" rel="noreferrer" className="td-focusable" style={{ fontSize: 11.5, color: COLOR.blueprint, fontFamily: "'Inter', sans-serif" }}>
+                      Check this address on a map
+                    </a>
+                  )}
+                  <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, lineHeight: 1.5 }}>
+                    A place is referred to by its name, so renaming one is not offered here — productions and schedule
+                    entries pointing at the old name would stop resolving. Add the new name, repoint what uses it, then
+                    remove the old one.
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="td-focusable"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addPlace()}
+          placeholder="e.g. Courtyard Stage"
+          style={{ ...inputStyle, flex: 1, maxWidth: 280, fontSize: 13, padding: '8px 10px' }}
+        />
+        <button
+          onClick={addPlace}
+          disabled={!newName.trim()}
+          className="td-focusable"
+          style={{ background: newName.trim() ? COLOR.amber : COLOR.slateDim, color: newName.trim() ? COLOR.void : COLOR.textFaint, border: 'none', borderRadius: 3, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: newName.trim() ? 'pointer' : 'not-allowed' }}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModule({
   positions,
   setPositions,
@@ -624,7 +789,6 @@ export function SettingsModule({
   CAST_TYPES, setCAST_TYPES, CAST_TYPE_ORDER, setCAST_TYPE_ORDER,
   orgId, isAdmin,
 }) {
-  const [newVenue, setNewVenue] = useState('');
   const [newLocation, setNewLocation] = useState('');
 
   const [orgName, setOrgName] = useState('your company');
@@ -661,16 +825,6 @@ export function SettingsModule({
       cancelled = true;
     };
   }, [orgId]);
-
-  function addVenue() {
-    const v = newVenue.trim();
-    if (!v || venues.includes(v)) return;
-    setVenues((prev) => [...prev, v].sort(byName));
-    setNewVenue('');
-  }
-  function removeVenue(v) {
-    setVenues((prev) => prev.filter((x) => x !== v));
-  }
 
   function addLocation() {
     const l = newLocation.trim();
@@ -788,19 +942,16 @@ export function SettingsModule({
 
           {/* Places and Locations both sit in Company because that is what they
               describe: the rooms this company works in. They are two cards, not
-              one, because they answer different questions — where the audience
-              sits, and where the gear lives — and the pickers that read them
-              never overlap. */}
+              one, because they answer different questions — where people are
+              called to, and where the gear lives — and the pickers that read
+              them never overlap. Places carry addresses because a schedule
+              entry names one and somebody has to drive there. */}
           <SettingCard label="Places">
             <div style={adminOnly}>
-              <ChipEditor
-                note="Where you perform. Offered when a production is added to the board."
-                items={venues}
-                onRemove={removeVenue}
-                value={newVenue}
-                setValue={setNewVenue}
-                onAdd={addVenue}
-                placeholder="e.g. Courtyard Stage"
+              <PlacesEditor
+                venues={venues}
+                setVenues={setVenues}
+                note="Where you work — stages, rehearsal rooms, the shop. Offered when a production is added to the board and on every schedule entry. Open one to give it an address and directions."
               />
             </div>
           </SettingCard>

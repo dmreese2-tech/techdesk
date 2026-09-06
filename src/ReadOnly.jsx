@@ -32,7 +32,6 @@ export const SECTION_MODULE = {
   choreography: 'choreography',
   costumes: 'costumes',
   props: 'props',
-  calls: 'calls',
   audio: 'audio',
   set: 'set',
   runofshow: 'runofshow',
@@ -80,8 +79,27 @@ export function ReadOnlyBanner({ module, admin }) {
 // of the keyboard's reach too — but it disables *every* descendant, and that
 // includes the export button. Reading a section and handing a copy to the shop
 // are the same permission; refusing the second while allowing the first would
-// be theatre. So: pointer-events, with links and export explicitly let back
-// through.
+// be theatre. So: pointer-events, with links, export, and view controls
+// explicitly let back through.
+//
+// `td-view-control` is for controls that change how the page is DISPLAYED and
+// nothing else — view toggles, filter pills, expand/collapse. Choosing to look
+// at the still-needed costumes is not editing them, and the people who most
+// need to filter a long list are exactly the people without a grant on it. The
+// test for adding this class is strict: the control must write to local render
+// state only. If it touches `setShows`, `setPeople`, `setInventory` or any
+// other collection, it does not get the class, because the gate is the only
+// thing standing between it and a save the database will refuse.
+//
+// `td-own-write` is the narrower one, and it IS a write: a control whose save
+// the database will accept from this user even though the module grant would
+// not. Only one thing qualifies today — signing yourself up for an open call,
+// which goes through the security definer RPC in migration 24 rather than the
+// gated show_items path. The rule for adding it is that the write must have
+// its own server-side authorization that does not go through can_write(); if
+// it does not, the gate stays on and the control stays dead, because a button
+// that works and then fails at the database is worse than one that never
+// pretended.
 //
 // The gap this leaves is a keyboard user tabbing into a field they can't save.
 // It is a real gap and it is the safe kind: the database still refuses, and the
@@ -91,7 +109,7 @@ export function ReadOnlyGate({ writable, module, admin, children }) {
 
   return (
     <>
-      <style>{'.td-readonly a, .td-readonly .td-export { pointer-events: auto; }'}</style>
+      <style>{'.td-readonly a, .td-readonly .td-export, .td-readonly .td-view-control, .td-readonly .td-own-write { pointer-events: auto; }'}</style>
       <ReadOnlyBanner module={module} admin={admin} />
       <div className="td-readonly" style={{ pointerEvents: 'none', opacity: 0.78 }}>
         {children}

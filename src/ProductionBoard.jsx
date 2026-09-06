@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
-import { PHASES, PHASE_LABELS, STATUS_META, TODAY, daysUntil, formatShortDate, nextMilestone } from './shared.jsx';
+import { PHASES, PHASE_LABELS, STATUS_META, daysUntil, formatShortDate, nextMilestone, venueNames } from './shared.jsx';
 
 // PRODUCTION BOARD — the dashboard cards, the add and edit production forms,
 // and the Get started checklist.
@@ -230,8 +230,10 @@ export function GetStarted({ steps, onGo, hasShow }) {
   );
 }
 export function EditShowForm({ show, venues, onSave, onClose }) {
+  // Places carry addresses now; a production still stores just the name.
+  const venueOptions = venueNames(venues);
   const [title, setTitle] = useState(show.title || '');
-  const [venue, setVenue] = useState(show.venue || venues[0] || 'Mainstage');
+  const [venue, setVenue] = useState(show.venue || venueNames(venues)[0] || 'Mainstage');
   const [director, setDirector] = useState(show.director === 'Unassigned' ? '' : show.director || '');
   const [phase, setPhase] = useState(show.phase || 'design');
   const [status, setStatus] = useState(show.status || 'standby');
@@ -265,7 +267,7 @@ export function EditShowForm({ show, venues, onSave, onClose }) {
         <div>
           <label className="td-mono" style={labelStyle}>VENUE</label>
           <select className="td-focusable" style={inputStyle} value={venue} onChange={(e) => setVenue(e.target.value)}>
-            {(venues.includes(venue) ? venues : [venue, ...venues]).map((v) => (
+            {(venueOptions.includes(venue) ? venueOptions : [venue, ...venueOptions]).map((v) => (
               <option key={v}>{v}</option>
             ))}
           </select>
@@ -331,8 +333,9 @@ export function EditShowForm({ show, venues, onSave, onClose }) {
   );
 }
 export function NewShowForm({ venues, onAdd, onClose }) {
+  const venueOptions = venueNames(venues);
   const [title, setTitle] = useState('');
-  const [venue, setVenue] = useState(venues[0] || 'Mainstage');
+  const [venue, setVenue] = useState(venueNames(venues)[0] || 'Mainstage');
   const [openDate, setOpenDate] = useState('2026-09-01');
 
   const inputStyle = {
@@ -362,7 +365,7 @@ export function NewShowForm({ venues, onAdd, onClose }) {
         <div>
           <label className="td-mono" style={labelStyle}>VENUE</label>
           <select className="td-focusable" style={inputStyle} value={venue} onChange={(e) => setVenue(e.target.value)}>
-            {venues.map((v) => (
+            {venueOptions.map((v) => (
               <option key={v}>{v}</option>
             ))}
           </select>

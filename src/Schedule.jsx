@@ -1,14 +1,31 @@
 import React, { useMemo, useState } from 'react';
-import { Briefcase, Music, Pencil, Plus, Star, UserCheck, Users, X } from 'lucide-react';
+import { Briefcase, MapPin, Music, Package, Pencil, Plus, Star, UserCheck, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { scheduleSpec } from './importSpecs.jsx';
-import { MILESTONE_PRESETS, TODAY, addMinutesToTime, assignmentsFor, byName, formatDuration, formatShortDate, formatTime12h } from './shared.jsx';
+import {
+  MILESTONE_PRESETS, PERSON_TYPES, PERSON_TYPE_ORDER, ROLL_STATUS, ROLL_STATUS_ORDER, TODAY,
+  addMinutesToTime, assignmentFor, assignmentsFor, byName, emptyCalled,
+  formatDuration, formatShortDate, formatTime12h, fromMinutes, hasAddress, isFullyCovered,
+  milestoneSlotsFor, normalizeEntry, rosterForType, sceneById, slotCoverage,
+  slotShortfall, venueAddressLine, venueByName, venueList, venueMapsUrl,
+} from './shared.jsx';
 import { StubPanel } from './ui.jsx';
 
-// SCHEDULE — load-in, rehearsals, tech week and strike. The callboard builds
-// its calls from these dates.
+// SCHEDULE — load-in, rehearsals, tech week, performances and strike, and the
+// callboard that used to be a second module describing the same events.
+//
+// Calls and Schedule were two records of one thing, kept loosely in sync by a
+// label match. A schedule entry now carries everything a call sheet carried:
+// where it is, which scenes are worked, what gear comes out, who is called,
+// who signed themselves up, and who actually turned up.
+//
+// Three words that used to overlap are now distinct:
+//   called  — roster ids the stage manager ticked. You are required.
+//   signups — people who claimed an open position, each with the stretch of
+//             the call they can actually cover.
+//   roll    — present / late / absent on the day, keyed by person.
 
 // ---------------------------------------------------------------------------
 // SCHEDULE HELPERS
@@ -28,27 +45,30 @@ export function buildMonthGrid(year, month) {
 export function dateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-export function attendanceCount(entry) {
-  const a = entry.attendance || {};
-  return (a.crew || []).length + (a.actors || []).length + (a.musicians || []).length + (a.staff || []).length;
+export function calledCount(entry) {
+  const c = entry.called || {};
+  return (c.crew || []).length + (c.actors || []).length + (c.musicians || []).length + (c.staff || []).length;
 }
 
 // ---------------------------------------------------------------------------
-// THE FOUR ATTENDANCE COLUMNS, described once.
+// THE FOUR CALLED COLUMNS, described once.
 //
-// `attendance` is keyed crew / actors / musicians / staff, and each roster
-// names the thing it groups by differently: crew assignments carry `dept`,
-// everyone else carries `category`. Cast group by cast position (Settings →
-// Cast positions); crew, band and staff group by department. Both the picker
-// and the roll-up read this list, so a fifth roster is one entry here rather
-// than four edits that have to agree.
+// `called` is keyed crew / actors / musicians / staff, and each roster names
+// the thing it groups by differently: crew assignments carry `dept`, everyone
+// else carries `category`. Cast group by cast position (Settings → Cast
+// positions); crew, band and staff group by department. Both the picker and
+// the roll-up read this list, so a fifth roster is one entry here rather than
+// four edits that have to agree.
 // ---------------------------------------------------------------------------
-export const ATTENDANCE_COLUMNS = [
-  { type: 'crew', label: 'Crew', icon: Users, keyField: 'dept', taxonomy: 'departments' },
-  { type: 'actors', label: 'Cast', icon: Star, keyField: 'category', taxonomy: 'castTypes' },
-  { type: 'musicians', label: 'Band', icon: Music, keyField: 'category', taxonomy: 'departments' },
-  { type: 'staff', label: 'Staff', icon: Briefcase, keyField: 'category', taxonomy: 'departments' },
+export const CALLED_COLUMNS = [
+  { type: 'crew', label: 'Crew', icon: Users, keyField: 'dept', taxonomy: 'departments', personType: 'crew' },
+  { type: 'actors', label: 'Cast', icon: Star, keyField: 'category', taxonomy: 'castTypes', personType: 'actor' },
+  { type: 'musicians', label: 'Band', icon: Music, keyField: 'category', taxonomy: 'departments', personType: 'musician' },
+  { type: 'staff', label: 'Staff', icon: Briefcase, keyField: 'category', taxonomy: 'departments', personType: 'staff' },
 ];
+
+// personType (singular, from PERSON_TYPES) -> called-column key (plural).
+const COLUMN_FOR_PERSON_TYPE = Object.fromEntries(CALLED_COLUMNS.map((c) => [c.personType, c.type]));
 
 // A group of one is not a group. "All Ensemble" over a single ensemble member
 // says less than her name does, so a roll-up needs at least two people behind
@@ -69,9 +89,37 @@ function eligibleFor(rosters, type, showId) {
   return rosterFor(rosters, type).filter((p) => assignmentsFor(p, showId).length > 0);
 }
 
+// Find a person across all four rosters — a sign-up is a person id and does
+// not carry which roster it came from once it is on the entry.
+function findPerson(rosters, personId) {
+  for (const col of CALLED_COLUMNS) {
+    const hit = rosterFor(rosters, col.type).find((p) => p.id === personId);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function personName(rosters, personId) {
+  const p = findPerson(rosters, personId);
+  return p ? p.name : '';
+}
+
+// `addedBy` on a sign-up is an auth user id, not a roster id — the RPC records
+// who was signed in when the sign-up was entered, and that account may be
+// linked to several roster records. Any of them names the same human, so the
+// first match is the answer.
+function nameForUserId(rosters, userId) {
+  if (!userId) return '';
+  for (const col of CALLED_COLUMNS) {
+    const hit = rosterFor(rosters, col.type).find((p) => p.userId === userId);
+    if (hit) return hit.name;
+  }
+  return '';
+}
+
 // ---------------------------------------------------------------------------
-// ATTENDANCE SUMMARY — who is actually called, said in the fewest words that
-// are still true.
+// CALLED SUMMARY — who is required, said in the fewest words that are still
+// true.
 //
 // Per roster: if every eligible person is called and they span more than one
 // group, that is "All Crew". Otherwise any group whose whole membership is
@@ -79,12 +127,12 @@ function eligibleFor(rosters, type, showId) {
 // Someone called who is no longer on the show is reported rather than dropped —
 // a stale tick is a person who thinks they have a call.
 // ---------------------------------------------------------------------------
-export function summarizeAttendance(entry, rosters, show, taxonomies) {
+export function summarizeCalled(entry, rosters, show, taxonomies) {
   const showId = show.id;
   const t = taxonomies || {};
-  return ATTENDANCE_COLUMNS.map((col) => {
+  return CALLED_COLUMNS.map((col) => {
     const roster = rosterFor(rosters, col.type);
-    const calledIds = new Set((entry.attendance || {})[col.type] || []);
+    const calledIds = new Set((entry.called || {})[col.type] || []);
     const eligible = eligibleFor(rosters, col.type, showId);
     const eligibleIds = new Set(eligible.map((p) => p.id));
 
@@ -121,7 +169,9 @@ export function summarizeAttendance(entry, rosters, show, taxonomies) {
       // Settings order first, then anything present but unordered — a group
       // added by hand to the JSON still has to appear somewhere.
       const known = order.filter((k) => total.has(k));
-      const extras = [...total.keys()].filter((k) => !known.includes(k)).sort((a, b) => byName(map[a]?.label || a, map[b]?.label || b));
+      const extras = [...total.keys()]
+        .filter((k) => !known.includes(k))
+        .sort((a, b) => byName(map[a]?.label || a, map[b]?.label || b));
       [...known, ...extras].forEach((key) => {
         const tot = total.get(key);
         const cal = called.get(key) || new Set();
@@ -132,10 +182,7 @@ export function summarizeAttendance(entry, rosters, show, taxonomies) {
       });
     }
 
-    const names = calledEligible
-      .filter((p) => !covered.has(p.id))
-      .map((p) => p.name)
-      .sort(byName);
+    const names = calledEligible.filter((p) => !covered.has(p.id)).map((p) => p.name).sort(byName);
 
     // Ticked, but not on this show any more — or not on the roster at all.
     const strays = [...calledIds].filter((id) => !eligibleIds.has(id));
@@ -149,8 +196,8 @@ export function summarizeAttendance(entry, rosters, show, taxonomies) {
 // Which of my roster records are ticked on this entry, and what I am called as.
 export function myRolesForEntry(entry, rosters, show, myPersonIds) {
   const titles = [];
-  ATTENDANCE_COLUMNS.forEach((col) => {
-    const calledIds = new Set((entry.attendance || {})[col.type] || []);
+  CALLED_COLUMNS.forEach((col) => {
+    const calledIds = new Set((entry.called || {})[col.type] || []);
     rosterFor(rosters, col.type).forEach((person) => {
       if (!myPersonIds.has(person.id) || !calledIds.has(person.id)) return;
       assignmentsFor(person, show.id).forEach((a) => {
@@ -163,9 +210,18 @@ export function myRolesForEntry(entry, rosters, show, myPersonIds) {
 }
 
 export function isCalled(entry, myPersonIds) {
-  return ATTENDANCE_COLUMNS.some((col) =>
-    ((entry.attendance || {})[col.type] || []).some((id) => myPersonIds.has(id))
-  );
+  return CALLED_COLUMNS.some((col) => ((entry.called || {})[col.type] || []).some((id) => myPersonIds.has(id)));
+}
+
+// Signed themselves up, as opposed to having been called.
+export function mySignups(entry, myPersonIds) {
+  const out = [];
+  (entry.slots || []).forEach((slot) => {
+    (slot.signups || []).forEach((s) => {
+      if (myPersonIds.has(s.personId)) out.push({ slot, signup: s });
+    });
+  });
+  return out;
 }
 
 // Roster records linked to the signed-in account. Read off the rosters rather
@@ -174,7 +230,7 @@ export function isCalled(entry, myPersonIds) {
 export function myPersonIdsFor(rosters, userId) {
   const ids = new Set();
   if (!userId) return ids;
-  ATTENDANCE_COLUMNS.forEach((col) => {
+  CALLED_COLUMNS.forEach((col) => {
     rosterFor(rosters, col.type).forEach((p) => {
       if (p.userId && p.userId === userId) ids.add(p.id);
     });
@@ -226,13 +282,166 @@ export function ScheduleViewSwitch({ view, setView }) {
 }
 
 // ---------------------------------------------------------------------------
-// ATTENDANCE PICKER — one column per roster, scoped to people already
-// linked to this show.
+// Small shared bits
 // ---------------------------------------------------------------------------
-export function AttendancePicker({ rosters, show, attendance, onToggle }) {
+const inputStyle = {
+  background: COLOR.void,
+  border: `1px solid ${COLOR.line}`,
+  borderRadius: 3,
+  padding: '8px 10px',
+  color: COLOR.textPrimary,
+  fontSize: 13,
+  width: '100%',
+};
+const labelStyle = { fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 5, display: 'block' };
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="td-mono" style={labelStyle}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SLOT ROLE — what a position is asking for. Picks from the same lists the
+// rosters cast against: characters for actors, position lists for everyone
+// else, so a position and an assignment can't drift apart in wording. Falls
+// back to free text for a person type whose list hasn't been set up yet.
+// ---------------------------------------------------------------------------
+export function SlotRoleField({ personType, value, onChange, slotOptions, style, placeholder }) {
+  const options = (slotOptions && slotOptions[personType]) || [];
+  if (!options.length) {
+    return <input className="td-focusable" style={style} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />;
+  }
+  return (
+    <select className="td-focusable" style={style} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Choose...</option>
+      {options.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+      {value && !options.includes(value) && <option value={value}>{value}</option>}
+    </select>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PLACE PICKER — and the address, shown where it is useful rather than filed
+// away in Settings where nobody reads it at 7am on a load-in day.
+// ---------------------------------------------------------------------------
+function PlacePicker({ venues, value, onChange }) {
+  const places = venueList(venues);
+  const chosen = venueByName(venues, value);
+  return (
+    <div>
+      <label className="td-mono" style={labelStyle}>PLACE</label>
+      <select className="td-focusable" style={inputStyle} value={value || ''} onChange={(e) => onChange(e.target.value)}>
+        <option value="">— Not set —</option>
+        {places.map((v) => (
+          <option key={v.name} value={v.name}>{v.name}</option>
+        ))}
+        {value && !chosen && <option value={value}>{value} (not in Settings)</option>}
+      </select>
+      {chosen && hasAddress(chosen) && (
+        <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, marginTop: 5 }}>{venueAddressLine(chosen)}</div>
+      )}
+      {value && !chosen && (
+        <div className="td-body" style={{ fontSize: 11, color: COLOR.amber, marginTop: 5 }}>
+          Not one of the company's places — add it in Settings → Places to give it an address.
+        </div>
+      )}
+      {places.length === 0 && (
+        <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, marginTop: 5 }}>
+          No places set up yet. Settings → Places.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlaceLine({ venues, name }) {
+  const venue = venueByName(venues, name);
+  if (!name) return null;
+  const url = venue ? venueMapsUrl(venue) : '';
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+      <MapPin size={11} color={COLOR.blueprint} strokeWidth={1.75} style={{ position: 'relative', top: 1, flexShrink: 0 }} />
+      <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.blueprint, letterSpacing: '0.04em' }}>{name.toUpperCase()}</span>
+      {venue && hasAddress(venue) && (
+        <>
+          <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>{venueAddressLine(venue)}</span>
+          {url && (
+            <a href={url} target="_blank" rel="noreferrer" className="td-focusable" style={{ fontSize: 11, color: COLOR.blueprint, fontFamily: "'Inter', sans-serif" }}>
+              Directions
+            </a>
+          )}
+        </>
+      )}
+      {venue && venue.notes && (
+        <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, fontStyle: 'italic' }}>{venue.notes}</span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// COVERAGE BAR — a position's staffing across the call, drawn to scale.
+//
+// A count would say "8 signed up for 6". This says which four hours are short,
+// which is the only version of that fact anyone can act on.
+// ---------------------------------------------------------------------------
+function CoverageBar({ entry, slot }) {
+  const segments = slotCoverage(entry, slot);
+  if (segments.length === 0) return null;
+  const start = segments[0].from;
+  const span = segments[segments.length - 1].to - start;
+  if (span <= 0) return null;
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: COLOR.void }}>
+        {segments.map((seg, i) => {
+          const short = seg.have < seg.need;
+          return (
+            <div
+              key={i}
+              title={`${formatTime12h(fromMinutes(seg.from))}-${formatTime12h(fromMinutes(seg.to))} · ${seg.have} of ${seg.need}`}
+              style={{
+                width: `${((seg.to - seg.from) / span) * 100}%`,
+                background: short ? (seg.have === 0 ? COLOR.slate : COLOR.amber) : COLOR.green,
+              }}
+            />
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
+        {segments.map((seg, i) => (
+          <span key={i} className="td-mono" style={{ fontSize: 9, color: seg.have < seg.need ? COLOR.amber : COLOR.textFaint }}>
+            {formatTime12h(fromMinutes(seg.from))}–{formatTime12h(fromMinutes(seg.to))} {seg.have}/{seg.need}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function shortfallSummary(entry, slot) {
+  const gaps = slotShortfall(entry, slot);
+  if (gaps.length === 0) return null;
+  return gaps
+    .map((g) => `${formatTime12h(fromMinutes(g.from))}–${formatTime12h(fromMinutes(g.to))} short ${g.need - g.have}`)
+    .join(' · ');
+}
+
+// ---------------------------------------------------------------------------
+// CALLED PICKER — one column per roster, scoped to people already linked to
+// this show.
+// ---------------------------------------------------------------------------
+export function CalledPicker({ rosters, show, called, onToggle }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-      {ATTENDANCE_COLUMNS.map((col) => {
+      {CALLED_COLUMNS.map((col) => {
         const Icon = col.icon;
         const people = eligibleFor(rosters, col.type, show.id);
         return (
@@ -240,18 +449,14 @@ export function AttendancePicker({ rosters, show, attendance, onToggle }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
               <Icon size={12} color={COLOR.textFaint} strokeWidth={1.75} />
               <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.04em' }}>
-                {col.label.toUpperCase()} — {(attendance[col.type] || []).length}
+                {col.label.toUpperCase()} — {(called[col.type] || []).length}
               </span>
             </div>
             <div style={{ maxHeight: 140, overflowY: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 8px' }} className="td-scrollbar">
               {people.length > 0 ? (
                 people.map((p) => (
                   <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={(attendance[col.type] || []).includes(p.id)}
-                      onChange={() => onToggle(col.type, p.id)}
-                    />
+                    <input type="checkbox" checked={(called[col.type] || []).includes(p.id)} onChange={() => onToggle(col.type, p.id)} />
                     <span className="td-body" style={{ fontSize: 11.5, color: COLOR.textMuted }}>{p.name}</span>
                   </label>
                 ))
@@ -265,29 +470,191 @@ export function AttendancePicker({ rosters, show, attendance, onToggle }) {
     </div>
   );
 }
+
 // ---------------------------------------------------------------------------
-// SCHEDULE ENTRY FORM — shared by add and edit
+// POSITION EDITOR — the part of the call sheet that says what the day needs.
+//
+// `needed` is a count, not a row per body. "Six general hands" is one line, and
+// nine people may sign up against it if they are each covering part of the day.
 // ---------------------------------------------------------------------------
-export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) {
+function SlotEditor({ entry, rosters, show, slots, setSlots, slotOptions, label }) {
+  function addSlot() {
+    setSlots((prev) => [...prev, { id: `slot-${Date.now()}-${prev.length}`, personType: 'crew', role: '', needed: 1, signups: [] }]);
+  }
+  function update(id, field, value) {
+    setSlots((prev) =>
+      prev.map((s) => {
+        if (s.id !== id) return s;
+        if (field === 'personType') return { ...s, personType: value, role: '', signups: [] };
+        if (field === 'needed') return { ...s, needed: Math.max(0, Number(value) || 0) };
+        return { ...s, [field]: value };
+      })
+    );
+  }
+  function remove(id) {
+    setSlots((prev) => prev.filter((s) => s.id !== id));
+  }
+  function addSignup(slotId, personId) {
+    if (!personId) return;
+    setSlots((prev) =>
+      prev.map((s) =>
+        s.id !== slotId || (s.signups || []).some((x) => x.personId === personId)
+          ? s
+          : { ...s, signups: [...(s.signups || []), { id: `su-${Date.now()}`, personId, from: '', to: '' }] }
+      )
+    );
+  }
+  function updateSignup(slotId, signupId, field, value) {
+    setSlots((prev) =>
+      prev.map((s) => (s.id !== slotId ? s : { ...s, signups: s.signups.map((x) => (x.id === signupId ? { ...x, [field]: value } : x)) }))
+    );
+  }
+  function removeSignup(slotId, signupId) {
+    setSlots((prev) => prev.map((s) => (s.id !== slotId ? s : { ...s, signups: s.signups.filter((x) => x.id !== signupId) })));
+  }
+
+  const suggested = milestoneSlotsFor(label, entry.id);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+        <label className="td-mono" style={{ ...labelStyle, marginBottom: 0 }}>WHAT THIS CALL NEEDS</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {suggested.length > 0 && slots.length === 0 && (
+            <button
+              onClick={() => setSlots(suggested)}
+              className="td-focusable"
+              style={{ background: 'transparent', color: COLOR.amber, border: `1px solid ${COLOR.amber}`, borderRadius: 3, padding: '5px 10px', fontSize: 11, cursor: 'pointer' }}
+            >
+              Use the usual {label} crew
+            </button>
+          )}
+          <button
+            onClick={addSlot}
+            className="td-focusable"
+            style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '5px 10px', fontSize: 11, cursor: 'pointer' }}
+          >
+            <Plus size={12} /> Add a position
+          </button>
+        </div>
+      </div>
+
+      {slots.length === 0 && (
+        <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 4 }}>
+          No positions yet. Ticking people under "Who is called" is enough for a rehearsal; positions are for calls
+          where you need a number of bodies rather than named people.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {slots.map((slot) => {
+          // Only people already on this production. Settled rule, and the
+          // sign-up RPC enforces the same thing — a name here that the RPC
+          // would refuse is a control that works for the stage manager and
+          // fails for everyone else, which is worse than not offering it.
+          // Somebody not on the show gets added on the People page first.
+          const roster = rosterForType(slot.personType, rosters);
+          const taken = new Set((slot.signups || []).map((s) => s.personId));
+          const gaps = shortfallSummary(entry, slot);
+          const freeOnShow = roster.filter((p) => assignmentFor(p, show.id) && !taken.has(p.id));
+          return (
+            <div key={slot.id} style={{ border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 118px auto', gap: 8, alignItems: 'center' }}>
+                <select className="td-focusable" style={inputStyle} value={slot.personType} onChange={(e) => update(slot.id, 'personType', e.target.value)}>
+                  {PERSON_TYPE_ORDER.map((t) => (
+                    <option key={t} value={t}>{PERSON_TYPES[t].label}</option>
+                  ))}
+                </select>
+                <SlotRoleField
+                  personType={slot.personType}
+                  value={slot.role}
+                  onChange={(v) => update(slot.id, 'role', v)}
+                  slotOptions={slotOptions}
+                  style={inputStyle}
+                  placeholder="Role, e.g. General Hand"
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <input
+                    className="td-focusable"
+                    type="number"
+                    min="0"
+                    style={{ ...inputStyle, width: 56 }}
+                    value={slot.needed}
+                    onChange={(e) => update(slot.id, 'needed', e.target.value)}
+                    aria-label="How many needed"
+                  />
+                  <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint }}>NEEDED</span>
+                </div>
+                <button onClick={() => remove(slot.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label="Remove position">
+                  <X size={14} />
+                </button>
+              </div>
+
+              <CoverageBar entry={entry} slot={slot} />
+              {gaps && <div className="td-mono" style={{ fontSize: 10, color: COLOR.amber }}>{gaps}</div>}
+
+              {(slot.signups || []).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {slot.signups.map((su) => (
+                    <div key={su.id} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 110px auto', gap: 8, alignItems: 'center' }}>
+                      <span className="td-body" style={{ fontSize: 12, color: COLOR.textPrimary }}>
+                        {personName(rosters, su.personId) || <em style={{ color: COLOR.textFaint }}>no longer on the roster</em>}
+                      </span>
+                      <input className="td-focusable" type="time" style={inputStyle} value={su.from} onChange={(e) => updateSignup(slot.id, su.id, 'from', e.target.value)} aria-label="Here from" />
+                      <input className="td-focusable" type="time" style={inputStyle} value={su.to} onChange={(e) => updateSignup(slot.id, su.id, 'to', e.target.value)} aria-label="Here until" />
+                      <button onClick={() => removeSignup(slot.id, su.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label="Remove sign-up">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint }}>Blank times mean the whole call.</div>
+                </div>
+              )}
+
+              <select className="td-focusable" style={inputStyle} value="" onChange={(e) => addSignup(slot.id, e.target.value)} aria-label="Add someone to this position">
+                <option value="">Add someone…</option>
+                {freeOnShow.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SCHEDULE ENTRY FORM — shared by add and edit. This is the old call sheet and
+// the old schedule form, which were always describing the same event.
+// ---------------------------------------------------------------------------
+export function ScheduleEntryForm({ show, rosters, venues, inventory, setInventory, slotOptions, initial, onSave, onCancel }) {
+  const [entryId] = useState(initial?.id || `sd${Date.now()}`);
   const [label, setLabel] = useState(initial?.label || '');
   const [date, setDate] = useState(initial?.date || '');
   const [time, setTime] = useState(initial?.time || '18:00');
   const [duration, setDuration] = useState(initial?.durationMinutes ?? 120);
+  const [location, setLocation] = useState(initial?.location || show.venue || '');
   const [isTechWeek, setIsTechWeek] = useState(initial?.isTechWeek || false);
+  const [openSignup, setOpenSignup] = useState(initial?.openSignup || false);
   const [breaks, setBreaks] = useState(initial?.breaks || []);
-  const [attendance, setAttendance] = useState(initial?.attendance || { crew: [], actors: [], musicians: [], staff: [] });
+  const [called, setCalled] = useState(initial?.called || emptyCalled());
+  const [slots, setSlots] = useState(initial?.slots || []);
+  const [sceneIds, setSceneIds] = useState(initial?.sceneIds || []);
   const [notes, setNotes] = useState(initial?.notes || '');
 
-  const inputStyle = {
-    background: COLOR.void,
-    border: `1px solid ${COLOR.line}`,
-    borderRadius: 3,
-    padding: '8px 10px',
-    color: COLOR.textPrimary,
-    fontSize: 13,
-    width: '100%',
-  };
-  const labelStyle = { fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 5, display: 'block' };
+  const [addingGear, setAddingGear] = useState(false);
+  const [newGearItemId, setNewGearItemId] = useState((inventory && inventory[0] && inventory[0].id) || '');
+  const [newGearQty, setNewGearQty] = useState(1);
+
+  const breaksTotal = breaks.reduce((sum, b) => sum + (Number(b.durationMinutes) || 0), 0);
+  const endTime = time ? formatTime12h(addMinutesToTime(time, (Number(duration) || 0) + breaksTotal)) : '';
+  const linkedGear = (inventory || []).filter((i) => (i.assignments || []).some((a) => a.entryId === entryId));
+
+  // The live entry, so coverage draws against the times currently in the form
+  // rather than whatever was saved last.
+  const draft = { id: entryId, time, durationMinutes: Number(duration) || 0, breaks };
 
   function addBreak() {
     setBreaks((prev) => [...prev, { id: `brk${Date.now()}`, label: 'Break', durationMinutes: 15 }]);
@@ -298,30 +665,56 @@ export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) 
   function removeBreak(id) {
     setBreaks((prev) => prev.filter((b) => b.id !== id));
   }
-  function toggleAttendance(type, personId) {
-    setAttendance((prev) => ({
+  function toggleCalled(type, personId) {
+    setCalled((prev) => ({
       ...prev,
       [type]: (prev[type] || []).includes(personId) ? (prev[type] || []).filter((x) => x !== personId) : [...(prev[type] || []), personId],
     }));
   }
-
-  const breaksTotal = breaks.reduce((sum, b) => sum + (Number(b.durationMinutes) || 0), 0);
-  const endTime = time ? formatTime12h(addMinutesToTime(time, (Number(duration) || 0) + breaksTotal)) : '';
+  function toggleScene(sceneId) {
+    setSceneIds((prev) => (prev.includes(sceneId) ? prev.filter((id) => id !== sceneId) : [...prev, sceneId]));
+  }
+  function addGear() {
+    if (!newGearItemId || !setInventory) return;
+    const qty = Math.max(1, Number(newGearQty) || 1);
+    setInventory((prev) =>
+      prev.map((i) => {
+        if (i.id !== newGearItemId) return i;
+        const existing = (i.assignments || []).find((a) => a.entryId === entryId);
+        if (existing) return { ...i, assignments: i.assignments.map((a) => (a.entryId === entryId ? { ...a, qty } : a)) };
+        return { ...i, assignments: [...(i.assignments || []), { id: `ia-${entryId}-${i.id}`, showId: show.id, entryId, qty }] };
+      })
+    );
+    setAddingGear(false);
+    setNewGearQty(1);
+  }
+  function removeGear(itemId) {
+    if (!setInventory) return;
+    setInventory((prev) => prev.map((i) => (i.id === itemId ? { ...i, assignments: (i.assignments || []).filter((a) => a.entryId !== entryId) } : i)));
+  }
 
   function handleSave() {
     if (!label.trim() || !date) return;
     onSave({
-      id: initial?.id || `sd${Date.now()}`,
+      id: entryId,
       label: label.trim(),
       date,
       time,
       durationMinutes: Number(duration) || 0,
+      location,
       isTechWeek,
+      openSignup,
       breaks,
-      attendance,
+      called,
+      slots,
+      sceneIds,
+      roll: (initial && initial.roll) || {},
       notes: notes.trim(),
     });
   }
+
+  const sectionStyle = { marginTop: 16, paddingTop: 14, borderTop: `1px solid ${COLOR.line}` };
+  const canSave = !!label.trim() && !!date;
 
   return (
     <div style={{ background: COLOR.card, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 18, marginBottom: 20 }}>
@@ -335,32 +728,33 @@ export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) 
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr 0.8fr', gap: 12 }}>
-        <div>
-          <label className="td-mono" style={labelStyle}>LABEL</label>
+        <Field label="LABEL">
           <input className="td-focusable" style={inputStyle} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Tech Rehearsal" list="schedule-label-presets" />
           <datalist id="schedule-label-presets">
             {MILESTONE_PRESETS.map((m) => (
               <option key={m} value={m} />
             ))}
           </datalist>
-        </div>
-        <div>
-          <label className="td-mono" style={labelStyle}>DATE</label>
+        </Field>
+        <Field label="DATE">
           <input className="td-focusable" type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="td-mono" style={labelStyle}>TIME</label>
+        </Field>
+        <Field label="TIME">
           <input className="td-focusable" type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} />
-        </div>
-        <div>
-          <label className="td-mono" style={labelStyle}>DURATION (MIN)</label>
+        </Field>
+        <Field label="DURATION (MIN)">
           <input className="td-focusable" type="number" min="0" step="15" style={inputStyle} value={duration} onChange={(e) => setDuration(e.target.value)} />
-        </div>
+        </Field>
+      </div>
+
+      <div style={{ marginTop: 12, maxWidth: 340 }}>
+        <PlacePicker venues={venues} value={location} onChange={setLocation} />
       </div>
 
       {time && (
         <div className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint, marginTop: 8 }}>
-          {formatTime12h(time)} – {endTime}{breaksTotal > 0 ? ` (includes ${formatDuration(breaksTotal)} of breaks)` : ''}
+          {formatTime12h(time)} – {endTime}
+          {breaksTotal > 0 ? ` (includes ${formatDuration(breaksTotal)} of breaks)` : ''}
         </div>
       )}
 
@@ -370,7 +764,110 @@ export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) 
         <span className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint }}>— used to catch gear double-booked across overlapping productions</span>
       </label>
 
-      <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${COLOR.line}` }}>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginTop: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={openSignup} onChange={(e) => setOpenSignup(e.target.checked)} style={{ marginTop: 3 }} />
+        <span>
+          <span className="td-mono" style={{ fontSize: 11, color: openSignup ? COLOR.green : COLOR.textMuted }}>Open for sign-ups</span>
+          <span className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, display: 'block', marginTop: 2, maxWidth: 560, lineHeight: 1.5 }}>
+            Anyone in the company can claim a position below, whether or not they were called, and say which stretch of
+            the call they can cover. Leave this off and only the people you tick are on it.
+          </span>
+        </span>
+      </label>
+
+      <div style={sectionStyle}>
+        <SlotEditor entry={draft} rosters={rosters} show={show} slots={slots} setSlots={setSlots} slotOptions={slotOptions} label={label.trim()} />
+      </div>
+
+      <div style={sectionStyle}>
+        <label className="td-mono" style={labelStyle}>WHO IS CALLED</label>
+        <CalledPicker rosters={rosters} show={show} called={called} onToggle={toggleCalled} />
+      </div>
+
+      <div style={sectionStyle}>
+        <label className="td-mono" style={{ ...labelStyle, marginBottom: 8 }}>SCENES BEING WORKED</label>
+        {(show.acts || []).length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {show.acts.map((act) => (
+              <div key={act.id}>
+                <div className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.04em', marginBottom: 5 }}>{act.name.toUpperCase()}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(act.scenes || []).length === 0 && <span className="td-body" style={{ fontSize: 11, color: COLOR.textFaint }}>No scenes in this act yet.</span>}
+                  {(act.scenes || []).map((sc, i) => (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      onClick={() => toggleScene(sc.id)}
+                      className="td-focusable"
+                      style={{
+                        background: sceneIds.includes(sc.id) ? COLOR.amber : 'transparent',
+                        color: sceneIds.includes(sc.id) ? COLOR.void : COLOR.textMuted,
+                        border: `1px solid ${sceneIds.includes(sc.id) ? COLOR.amber : COLOR.line}`,
+                        borderRadius: 20,
+                        padding: '4px 12px',
+                        fontSize: 11.5,
+                        fontFamily: "'Inter', sans-serif",
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {i + 1}. {sc.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>No scenes set up for {show.title} yet — add Acts and Scenes on the Scenes page.</div>
+        )}
+      </div>
+
+      {setInventory && (
+        <div style={sectionStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <label className="td-mono" style={{ ...labelStyle, marginBottom: 0 }}>GEAR PULLED</label>
+            <button
+              onClick={() => setAddingGear((v) => !v)}
+              disabled={(inventory || []).length === 0}
+              className="td-focusable"
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '5px 10px', fontSize: 11, cursor: (inventory || []).length ? 'pointer' : 'not-allowed' }}
+            >
+              <Plus size={12} /> Pull gear
+            </button>
+          </div>
+          {linkedGear.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: addingGear ? 8 : 0 }}>
+              {linkedGear.map((item) => {
+                const a = (item.assignments || []).find((x) => x.entryId === entryId);
+                return (
+                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: COLOR.panel, borderRadius: 3 }}>
+                    <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.amber, flex: 1 }}>{item.assetNo} — {item.name}</span>
+                    <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>×{(a && a.qty) || 1}</span>
+                    <button onClick={() => removeGear(item.id)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', display: 'flex' }} aria-label="Remove gear">
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {linkedGear.length === 0 && !addingGear && <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint }}>No gear pulled for this call yet.</div>}
+          {addingGear && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select className="td-focusable" value={newGearItemId} onChange={(e) => setNewGearItemId(e.target.value)} style={{ ...inputStyle, width: 'auto', flex: 1, minWidth: 180 }}>
+                {(inventory || []).map((item) => (
+                  <option key={item.id} value={item.id}>{item.assetNo} — {item.name}</option>
+                ))}
+              </select>
+              <input className="td-focusable" type="number" min="1" value={newGearQty} onChange={(e) => setNewGearQty(e.target.value)} style={{ ...inputStyle, width: 60 }} />
+              <button onClick={addGear} className="td-focusable" style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '7px 14px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>Add</button>
+              <button onClick={() => setAddingGear(false)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, cursor: 'pointer' }}>Cancel</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={sectionStyle}>
         <label className="td-mono" style={labelStyle}>BREAKS</label>
         {breaks.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
@@ -394,12 +891,7 @@ export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) 
         </button>
       </div>
 
-      <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${COLOR.line}` }}>
-        <label className="td-mono" style={labelStyle}>ATTENDANCE</label>
-        <AttendancePicker rosters={rosters} show={show} attendance={attendance} onToggle={toggleAttendance} />
-      </div>
-
-      <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${COLOR.line}` }}>
+      <div style={sectionStyle}>
         <label className="td-mono" style={labelStyle}>NOTES — WHAT WILL BE DONE</label>
         <textarea
           className="td-focusable"
@@ -413,27 +905,23 @@ export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) 
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button
           onClick={handleSave}
-          disabled={!label.trim() || !date}
+          disabled={!canSave}
           className="td-focusable"
           style={{
-            background: label.trim() && date ? COLOR.amber : COLOR.slateDim,
-            color: label.trim() && date ? COLOR.void : COLOR.textFaint,
+            background: canSave ? COLOR.amber : COLOR.slateDim,
+            color: canSave ? COLOR.void : COLOR.textFaint,
             border: 'none',
             borderRadius: 3,
             padding: '9px 16px',
             fontSize: 12,
             fontWeight: 600,
             letterSpacing: '0.03em',
-            cursor: label.trim() && date ? 'pointer' : 'not-allowed',
+            cursor: canSave ? 'pointer' : 'not-allowed',
           }}
         >
           {initial ? 'Save changes' : 'Add to schedule'}
         </button>
-        <button
-          onClick={onCancel}
-          className="td-focusable"
-          style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '9px 16px', fontSize: 12, cursor: 'pointer' }}
-        >
+        <button onClick={onCancel} className="td-focusable" style={{ background: 'transparent', color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '9px 16px', fontSize: 12, cursor: 'pointer' }}>
           Cancel
         </button>
       </div>
@@ -444,18 +932,15 @@ export function ScheduleEntryForm({ show, rosters, initial, onSave, onCancel }) 
 // ---------------------------------------------------------------------------
 // WHO IS CALLED — the named roll-up that replaced the four counts.
 // ---------------------------------------------------------------------------
-function AttendanceNames({ entry, rosters, show, taxonomies }) {
+function CalledNames({ entry, rosters, show, taxonomies }) {
   const [expanded, setExpanded] = useState(false);
-  const columns = useMemo(
-    () => summarizeAttendance(entry, rosters, show, taxonomies),
-    [entry, rosters, show, taxonomies]
-  );
+  const columns = useMemo(() => summarizeCalled(entry, rosters, show, taxonomies), [entry, rosters, show, taxonomies]);
   const live = columns.filter((c) => c.count > 0);
 
   if (live.length === 0) {
     return (
       <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, marginTop: 8 }}>
-        Attendance not set — nobody has been ticked for this call
+        Nobody has been ticked as called for this entry
       </div>
     );
   }
@@ -476,23 +961,17 @@ function AttendanceNames({ entry, rosters, show, taxonomies }) {
             </span>
             <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
               {col.chips.map((chip) => (
-                <span
-                  key={chip.key}
-                  className="td-mono"
-                  style={{ fontSize: 10, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '1px 6px', whiteSpace: 'nowrap' }}
-                >
+                <span key={chip.key} className="td-mono" style={{ fontSize: 10, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '1px 6px', whiteSpace: 'nowrap' }}>
                   {chip.label}
                 </span>
               ))}
               {shown.length > 0 && (
-                <span className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, lineHeight: 1.5 }}>
-                  {shown.join(' · ')}
-                </span>
+                <span className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, lineHeight: 1.5 }}>{shown.join(' · ')}</span>
               )}
               {overflow > 0 && !expanded && (
                 <button
                   onClick={() => setExpanded(true)}
-                  className="td-focusable"
+                  className="td-focusable td-view-control"
                   style={{ background: 'transparent', border: 'none', color: COLOR.blueprint, fontSize: 11.5, fontFamily: "'Inter', sans-serif", cursor: 'pointer', padding: 0 }}
                 >
                   +{overflow} more
@@ -517,14 +996,190 @@ function AttendanceNames({ entry, rosters, show, taxonomies }) {
 }
 
 // ---------------------------------------------------------------------------
-// SCHEDULE ENTRY CARD (list view + calendar detail + my calls)
-//
-// onEdit / onRemove are optional: My Calls is a reading view and shows neither.
+// SIGN-UP SHEET — the positions on an entry, as read by whoever is looking at
+// it rather than by whoever wrote it.
 // ---------------------------------------------------------------------------
-export function ScheduleEntryCard({ entry, show, rosters, taxonomies, youAre, onEdit, onRemove }) {
+function SignUpSheet({ entry, rosters, actingIds, actingName, canManage, canTakeRoll, onSignUp, onWithdraw, onSetRoll }) {
+  const [openSlotId, setOpenSlotId] = useState(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  const slots = entry.slots || [];
+  if (slots.length === 0) return null;
+
+  function begin(slotId) {
+    setOpenSlotId(slotId === openSlotId ? null : slotId);
+    setFrom('');
+    setTo('');
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
+      <div className="td-mono" style={{ fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.04em', marginBottom: 8 }}>POSITIONS</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {slots.map((slot) => {
+          const covered = isFullyCovered(entry, slot);
+          const gaps = shortfallSummary(entry, slot);
+          const meta = PERSON_TYPES[slot.personType] || PERSON_TYPES.crew;
+          const TypeIcon = meta.icon;
+          const columnKey = COLUMN_FOR_PERSON_TYPE[slot.personType];
+          // A sign-up has to come from the roster the position asks for: an
+          // actor cannot claim a Board Op slot with her cast record.
+          const myIdForSlot = [...actingIds].find((id) => rosterFor(rosters, columnKey).some((p) => p.id === id));
+          const mine = (slot.signups || []).find((s) => actingIds.has(s.personId));
+
+          return (
+            <div key={slot.id} style={{ borderTop: `1px solid ${COLOR.line}`, paddingTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, width: 62, flexShrink: 0 }}>
+                  <TypeIcon size={11} color={COLOR.textFaint} strokeWidth={1.75} />
+                  <span className="td-mono" style={{ fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.03em' }}>{meta.label.toUpperCase()}</span>
+                </div>
+                <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, flex: 1, minWidth: 120 }}>{slot.role || 'Unnamed position'}</span>
+                <span className="td-mono" style={{ fontSize: 10, color: covered ? COLOR.green : COLOR.amber, flexShrink: 0 }}>
+                  {covered ? 'COVERED' : `NEEDS ${slot.needed}`}
+                </span>
+                {/* Open to everyone when the entry says so; open to a schedule
+                    editor regardless, which is what the RPC already permits.
+                    Hiding it from them here made the client stricter than the
+                    server for no reason and pushed a stage manager into the
+                    full entry form to do one thing. */}
+                {(entry.openSignup || canManage) && !mine && myIdForSlot && (
+                  <button
+                    onClick={() => begin(slot.id)}
+                    className="td-focusable td-own-write"
+                    style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '3px 10px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    {actingName ? `Sign up ${actingName.split(' ')[0]}` : 'Sign up'}
+                  </button>
+                )}
+                {!entry.openSignup && canManage && !mine && myIdForSlot && (
+                  <span className="td-mono" style={{ fontSize: 9, color: COLOR.textFaint, flexShrink: 0 }}>
+                    NOT OPEN — YOU CAN ADD ANYWAY
+                  </span>
+                )}
+                {mine && (
+                  <button
+                    onClick={() => onWithdraw(entry.id, slot.id, mine.id)}
+                    className="td-focusable td-own-write"
+                    style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 10.5, cursor: 'pointer', textDecoration: 'underline', flexShrink: 0 }}
+                  >
+                    {actingName ? 'Remove' : 'Cancel mine'}
+                  </button>
+                )}
+              </div>
+
+              <CoverageBar entry={entry} slot={slot} />
+              {gaps && <div className="td-mono" style={{ fontSize: 10, color: COLOR.amber, marginTop: 4 }}>{gaps}</div>}
+
+              {openSlotId === slot.id && (
+                <div className="td-own-write" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap', background: COLOR.panel, padding: 10, borderRadius: 4 }}>
+                  <div style={{ width: 130 }}>
+                    <label className="td-mono" style={labelStyle}>HERE FROM</label>
+                    <input className="td-focusable" type="time" style={inputStyle} value={from} onChange={(e) => setFrom(e.target.value)} />
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <label className="td-mono" style={labelStyle}>UNTIL</label>
+                    <input className="td-focusable" type="time" style={inputStyle} value={to} onChange={(e) => setTo(e.target.value)} />
+                  </div>
+                  <button
+                    onClick={() => { onSignUp(entry.id, slot.id, myIdForSlot, from, to); setOpenSlotId(null); }}
+                    className="td-focusable"
+                    style={{ background: COLOR.amber, color: COLOR.void, border: 'none', borderRadius: 3, padding: '8px 14px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    I'm in
+                  </button>
+                  <button onClick={() => setOpenSlotId(null)} className="td-focusable" style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, cursor: 'pointer', padding: '8px 4px' }}>
+                    Cancel
+                  </button>
+                  <span className="td-body" style={{ fontSize: 10.5, color: COLOR.textFaint, flexBasis: '100%' }}>
+                    Leave both blank if you can be there for the whole call.
+                  </span>
+                </div>
+              )}
+
+              {(slot.signups || []).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+                  {slot.signups.map((su) => {
+                    const name = personName(rosters, su.personId);
+                    const isMe = actingIds.has(su.personId);
+                    const mark = (entry.roll && entry.roll[su.personId]) || 'pending';
+                    return (
+                      <div key={su.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span className="td-mono" style={{ fontSize: 11, color: isMe ? COLOR.amber : COLOR.textPrimary }}>
+                          {name || 'Off the roster'}{isMe ? ' · you' : ''}
+                        </span>
+                        <span className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint }}>
+                          {su.from || su.to
+                            ? `${su.from ? formatTime12h(su.from) : 'start'} – ${su.to ? formatTime12h(su.to) : 'end'}`
+                            : 'whole call'}
+                        </span>
+                        {/* Who entered this. Absent when you signed yourself
+                            up, which is the ordinary case and needs no
+                            explanation. Present when somebody did it for you,
+                            which is the case that gets argued about on a
+                            Monday morning. */}
+                        {su.addedBy && (
+                          <span
+                            className="td-mono"
+                            title="This sign-up was entered on their behalf"
+                            style={{ fontSize: 9, color: COLOR.textFaint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '0 5px' }}
+                          >
+                            ADDED BY {(nameForUserId(rosters, su.addedBy) || 'someone else').toUpperCase()}
+                          </span>
+                        )}
+                        {canTakeRoll && (
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            {ROLL_STATUS_ORDER.map((s) => (
+                              <button
+                                key={s}
+                                onClick={() => onSetRoll(entry.id, su.personId, mark === s ? 'pending' : s)}
+                                className="td-focusable"
+                                title={ROLL_STATUS[s].label}
+                                style={{
+                                  background: mark === s ? ROLL_STATUS[s].color : 'transparent',
+                                  color: mark === s ? COLOR.void : COLOR.textFaint,
+                                  border: `1px solid ${mark === s ? ROLL_STATUS[s].color : COLOR.line}`,
+                                  borderRadius: 3,
+                                  padding: '0px 6px',
+                                  fontSize: 9,
+                                  fontFamily: "'IBM Plex Mono', monospace",
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {ROLL_STATUS[s].label.toUpperCase()}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SCHEDULE ENTRY CARD — list view, calendar detail and my-calls all read this.
+//
+// onEdit / onRemove are optional: My Calls is mostly a reading view.
+// ---------------------------------------------------------------------------
+export function ScheduleEntryCard({
+  entry, show, rosters, venues, inventory, taxonomies, youAre, actingIds, actingName,
+  canManage, canTakeRoll, onSignUp, onWithdraw, onSetRoll, onEdit, onRemove,
+}) {
   const isPast = new Date(entry.date + 'T00:00:00') < TODAY;
   const breaksTotal = (entry.breaks || []).reduce((s, b) => s + (Number(b.durationMinutes) || 0), 0);
   const endTime = entry.time ? formatTime12h(addMinutesToTime(entry.time, (entry.durationMinutes || 0) + breaksTotal)) : '';
+  const scenes = (entry.sceneIds || []).map((id) => sceneById(show, id)).filter(Boolean);
+  const linkedGear = (inventory || []).filter((i) => (i.assignments || []).some((a) => a.entryId === entry.id));
+  const shortSlots = (entry.slots || []).filter((s) => !isFullyCovered(entry, s));
 
   return (
     <div style={{ display: 'flex', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4, overflow: 'hidden', opacity: isPast ? 0.6 : 1 }}>
@@ -540,6 +1195,16 @@ export function ScheduleEntryCard({ entry, show, rosters, taxonomies, youAre, on
               {entry.isTechWeek && (
                 <span className="td-mono" style={{ fontSize: 8.5, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '1px 6px', letterSpacing: '0.04em' }}>
                   TECH WEEK
+                </span>
+              )}
+              {entry.openSignup && (
+                <span className="td-mono" style={{ fontSize: 8.5, color: COLOR.green, border: `1px solid ${COLOR.green}`, borderRadius: 3, padding: '1px 6px', letterSpacing: '0.04em' }}>
+                  OPEN FOR SIGN-UPS
+                </span>
+              )}
+              {shortSlots.length > 0 && (
+                <span className="td-mono" style={{ fontSize: 8.5, color: COLOR.amber, border: `1px solid ${COLOR.amberDim}`, borderRadius: 3, padding: '1px 6px', letterSpacing: '0.04em' }}>
+                  {shortSlots.length} POSITION{shortSlots.length === 1 ? '' : 'S'} SHORT
                 </span>
               )}
             </div>
@@ -564,6 +1229,8 @@ export function ScheduleEntryCard({ entry, show, rosters, taxonomies, youAre, on
           )}
         </div>
 
+        <PlaceLine venues={venues} name={entry.location} />
+
         {youAre && youAre.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
             <UserCheck size={12} color={COLOR.amber} strokeWidth={2} />
@@ -573,9 +1240,48 @@ export function ScheduleEntryCard({ entry, show, rosters, taxonomies, youAre, on
           </div>
         )}
 
+        {scenes.length > 0 && (
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
+            {scenes.map((sc) => (
+              <span key={sc.id} className="td-mono" style={{ fontSize: 9.5, color: COLOR.blueprint, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '2px 7px' }}>
+                {sc.actName} — {sc.number}. {sc.name}
+              </span>
+            ))}
+          </div>
+        )}
+
         {entry.notes && <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textMuted, marginTop: 8 }}>{entry.notes}</div>}
 
-        <AttendanceNames entry={entry} rosters={rosters} show={show} taxonomies={taxonomies} />
+        <CalledNames entry={entry} rosters={rosters} show={show} taxonomies={taxonomies} />
+
+        {onSignUp && (
+          <SignUpSheet
+            entry={entry}
+            rosters={rosters}
+            actingIds={actingIds || new Set()}
+            actingName={actingName}
+            canManage={canManage}
+            canTakeRoll={canTakeRoll}
+            onSignUp={onSignUp}
+            onWithdraw={onWithdraw}
+            onSetRoll={onSetRoll}
+          />
+        )}
+
+        {linkedGear.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${COLOR.line}` }}>
+            <div className="td-mono" style={{ fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.04em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Package size={10} strokeWidth={1.75} /> GEAR PULLED
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {linkedGear.map((item) => (
+                <span key={item.id} className="td-mono" style={{ fontSize: 10, color: COLOR.textMuted, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '3px 8px' }}>
+                  {item.assetNo} · {item.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -584,12 +1290,13 @@ export function ScheduleEntryCard({ entry, show, rosters, taxonomies, youAre, on
 // ---------------------------------------------------------------------------
 // MY CALLS — the schedule filtered to the person reading it.
 //
-// Three bands, in the order they matter: calls still to come, calls where
-// nobody has set attendance at all (which is not the same as "you are not
-// called", and saying so is the difference between someone turning up and
-// someone not), and calls already past, folded away.
+// Four bands now, in the order they matter: calls you are ticked for, calls you
+// signed yourself up for, calls open for sign-ups that you are not yet on, and
+// entries where nothing has been set at all — which is not the same as "you are
+// not called", and saying so is the difference between someone turning up and
+// someone not.
 // ---------------------------------------------------------------------------
-function MyCallsView({ show, rosters, taxonomies, sorted, myPersonIds, myUserId }) {
+function MyCallsView({ show, rosters, venues, inventory, taxonomies, sorted, myPersonIds, myUserId, actingIds, onSignUp, onWithdraw }) {
   const [showPast, setShowPast] = useState(false);
 
   if (!myUserId || myPersonIds.size === 0) {
@@ -601,38 +1308,52 @@ function MyCallsView({ show, rosters, taxonomies, sorted, myPersonIds, myUserId 
     );
   }
 
-  const mine = [];
-  const unset = [];
-  sorted.forEach((entry) => {
-    if (isCalled(entry, myPersonIds)) mine.push(entry);
-    else if (attendanceCount(entry) === 0) unset.push(entry);
-  });
   const isPast = (entry) => new Date(entry.date + 'T00:00:00') < TODAY;
-  const upcoming = mine.filter((e) => !isPast(e));
-  const past = mine.filter(isPast);
+  const mine = [];
+  const signedUp = [];
+  const open = [];
+  const unset = [];
 
-  const cardFor = (entry) => (
+  sorted.forEach((entry) => {
+    const called = isCalled(entry, myPersonIds);
+    const claimed = mySignups(entry, myPersonIds).length > 0;
+    if (called) mine.push(entry);
+    else if (claimed) signedUp.push(entry);
+    else if (entry.openSignup && !isPast(entry) && (entry.slots || []).some((s) => !isFullyCovered(entry, s))) open.push(entry);
+    else if (calledCount(entry) === 0 && (entry.slots || []).length === 0) unset.push(entry);
+  });
+
+  const upcoming = mine.filter((e) => !isPast(e));
+  const signedUpUpcoming = signedUp.filter((e) => !isPast(e));
+  const past = [...mine, ...signedUp].filter(isPast);
+
+  const cardFor = (entry, interactive) => (
     <ScheduleEntryCard
       key={entry.id}
       entry={entry}
       show={show}
       rosters={rosters}
+      venues={venues}
+      inventory={inventory}
       taxonomies={taxonomies}
       youAre={myRolesForEntry(entry, rosters, show, myPersonIds)}
+      actingIds={actingIds}
+      canManage={false}
+      canTakeRoll={false}
+      onSignUp={interactive ? onSignUp : undefined}
+      onWithdraw={onWithdraw}
     />
   );
 
   const bandLabel = (text) => (
-    <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.08em', marginBottom: 8 }}>
-      {text}
-    </div>
+    <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.08em', marginBottom: 8 }}>{text}</div>
   );
 
-  if (mine.length === 0 && unset.length === 0) {
+  if (mine.length === 0 && signedUp.length === 0 && open.length === 0 && unset.length === 0) {
     return (
       <StubPanel
         label={`You have no calls on ${show.title}`}
-        hint="Nothing on this production's schedule has you ticked. If you were expecting a call, whoever runs the schedule can add you to it — attendance is set per entry."
+        hint="Nothing on this production's schedule has you ticked, and nothing is open for sign-ups. If you were expecting a call, whoever runs the schedule can add you to it — attendance is set per entry."
       />
     );
   }
@@ -642,22 +1363,38 @@ function MyCallsView({ show, rosters, taxonomies, sorted, myPersonIds, myUserId 
       <div>
         {bandLabel(`YOUR CALLS — ${upcoming.length} UPCOMING`)}
         {upcoming.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{upcoming.map(cardFor)}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{upcoming.map((e) => cardFor(e, true))}</div>
         ) : (
-          <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint }}>
-            Nothing coming up that you are ticked for.
-          </div>
+          <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint }}>Nothing coming up that you are ticked for.</div>
         )}
       </div>
 
+      {signedUpUpcoming.length > 0 && (
+        <div>
+          {bandLabel(`YOU SIGNED UP FOR — ${signedUpUpcoming.length}`)}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{signedUpUpcoming.map((e) => cardFor(e, true))}</div>
+        </div>
+      )}
+
+      {open.length > 0 && (
+        <div>
+          {bandLabel(`OPEN FOR SIGN-UPS — ${open.length}`)}
+          <div className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, marginBottom: 10, lineHeight: 1.55, maxWidth: 640 }}>
+            You are not called for these, but they are short-handed and anyone can claim a position. Say which stretch of
+            the call you can cover — two half-days cover one body as well as one full day does.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{open.map((e) => cardFor(e, true))}</div>
+        </div>
+      )}
+
       {unset.length > 0 && (
         <div>
-          {bandLabel(`ATTENDANCE NOT SET — ${unset.length}`)}
+          {bandLabel(`NOTHING SET — ${unset.length}`)}
           <div className="td-body" style={{ fontSize: 12, color: COLOR.textMuted, marginBottom: 10, lineHeight: 1.55, maxWidth: 640 }}>
-            Nobody has been ticked for these yet, so they are neither yours nor not yours. Check with whoever
-            runs the schedule before assuming you are free.
+            Nobody has been ticked for these and no positions have been posted, so they are neither yours nor not yours.
+            Check with whoever runs the schedule before assuming you are free.
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{unset.map(cardFor)}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{unset.map((e) => cardFor(e, false))}</div>
         </div>
       )}
 
@@ -665,12 +1402,12 @@ function MyCallsView({ show, rosters, taxonomies, sorted, myPersonIds, myUserId 
         <div>
           <button
             onClick={() => setShowPast((v) => !v)}
-            className="td-focusable"
+            className="td-focusable td-view-control"
             style={{ background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11.5, fontFamily: "'Inter', sans-serif", padding: '6px 12px', cursor: 'pointer', marginBottom: showPast ? 12 : 0 }}
           >
             {showPast ? 'Hide' : 'Show'} {past.length} past {past.length === 1 ? 'call' : 'calls'}
           </button>
-          {showPast && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{past.map(cardFor)}</div>}
+          {showPast && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{past.map((e) => cardFor(e, false))}</div>}
         </div>
       )}
     </div>
@@ -678,7 +1415,37 @@ function MyCallsView({ show, rosters, taxonomies, sorted, myPersonIds, myUserId 
 }
 
 // ---------------------------------------------------------------------------
-// SCHEDULE MODULE — list, calendar and my-calls views over one show's schedule.
+// ACTING-AS — sign-up and roll run off the roster records linked to the signed
+// in account. Someone with a schedule grant can act for another person, because
+// half of a stage manager's day is signing up people who phoned it in.
+// ---------------------------------------------------------------------------
+function ActingAsBar({ rosters, show, myPersonIds, actingId, setActingId }) {
+  const everyone = CALLED_COLUMNS.flatMap((col) =>
+    eligibleFor(rosters, col.type, show.id).map((p) => ({ id: p.id, name: p.name, columnLabel: col.label }))
+  ).sort((a, b) => byName(a.name, b.name));
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+      <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.textFaint, letterSpacing: '0.05em' }}>SIGNING UP AS</span>
+      <select
+        className="td-focusable"
+        value={actingId}
+        onChange={(e) => setActingId(e.target.value)}
+        style={{ ...inputStyle, width: 'auto', minWidth: 220, fontSize: 12 }}
+      >
+        <option value="">Me{myPersonIds.size === 0 ? ' (account not linked to a roster record)' : ''}</option>
+        {everyone.map((p) => (
+          <option key={p.id} value={p.id}>{p.name} — {p.columnLabel}</option>
+        ))}
+      </select>
+      {actingId && <span className="td-mono" style={{ fontSize: 10, color: COLOR.amber }}>Acting on someone else's behalf</span>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SCHEDULE MODULE — list, calendar and my-calls views over one show's
+// schedule, which is now also its callboard.
 //
 // `view` and `setView` are owned by the shell so the switch can render outside
 // the read-only gate. Everything else stays here.
@@ -686,9 +1453,16 @@ function MyCallsView({ show, rosters, taxonomies, sorted, myPersonIds, myUserId 
 export function ScheduleModule({
   show,
   rosters,
+  venues,
+  inventory,
+  setInventory,
+  slotOptions,
   onScheduleChange,
+  onSignUpRequest,
+  onWithdrawRequest,
   view = 'list',
   myUserId,
+  canEdit = true,
   CAST_TYPES,
   CAST_TYPE_ORDER,
   DEPARTMENTS,
@@ -698,9 +1472,19 @@ export function ScheduleModule({
   const [editingId, setEditingId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [calendarDate, setCalendarDate] = useState(TODAY);
+  const [actingId, setActingId] = useState('');
 
-  const schedule = show.schedule || [];
-  const sorted = schedule.slice().sort((a, b) => (a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
+  // Read either shape. Entries written before the merge carry `attendance` and
+  // legacy call slots; normalizeEntry is idempotent, so this is safe to run on
+  // every render and on already-migrated data alike.
+  const schedule = useMemo(() => (show.schedule || []).map(normalizeEntry).filter(Boolean), [show.schedule]);
+  const sorted = useMemo(
+    () =>
+      schedule
+        .slice()
+        .sort((a, b) => (a.date === b.date ? String(a.time || '').localeCompare(String(b.time || '')) : String(a.date).localeCompare(String(b.date)))),
+    [schedule]
+  );
 
   const taxonomies = useMemo(
     () => ({
@@ -713,18 +1497,74 @@ export function ScheduleModule({
   );
 
   const myPersonIds = useMemo(() => myPersonIdsFor(rosters, myUserId), [rosters, myUserId]);
+  // Who a sign-up is FOR. Normally the account's own roster records; a schedule
+  // editor can act for someone else, which is the admin override.
+  const actingIds = useMemo(() => (actingId ? new Set([actingId]) : myPersonIds), [actingId, myPersonIds]);
+  // Non-empty only while acting on somebody else's behalf, so every label that
+  // says "mine" can say whose instead.
+  const actingName = actingId ? personName(rosters, actingId) : '';
 
+  function commit(next) {
+    onScheduleChange(show.id, next);
+  }
   function addEntry(entry) {
-    onScheduleChange(show.id, [...schedule, entry]);
+    commit([...schedule, entry]);
     setAdding(false);
   }
   function saveEntry(entry) {
-    onScheduleChange(show.id, schedule.map((e) => (e.id === entry.id ? entry : e)));
+    commit(schedule.map((e) => (e.id === entry.id ? entry : e)));
     setEditingId(null);
   }
   function removeEntry(id) {
-    onScheduleChange(show.id, schedule.filter((e) => e.id !== id));
+    commit(schedule.filter((e) => e.id !== id));
+    // Gear pulled for an entry that no longer exists goes back on the shelf.
+    // The old code tested `i.callId`, a field inventory items never had — the
+    // assignment carries it — so nothing was ever actually released.
+    if (setInventory) {
+      setInventory((prev) => prev.map((i) => ({ ...i, assignments: (i.assignments || []).filter((a) => a.entryId !== id) })));
+    }
     if (selectedId === id) setSelectedId(null);
+  }
+
+  // Sign-up and withdrawal do NOT go through `commit`. They are the one thing
+  // on this page a person without a schedule grant is allowed to do, and the
+  // ordinary show_items write is gated on exactly that grant. So they go to a
+  // security definer RPC (migration 24) that owns the rules, and the dashboard
+  // applies the returned entry through the remote-sync path — which is why
+  // these are async and why failures surface rather than being swallowed by
+  // the debounced autosave.
+  const [signupError, setSignupError] = useState('');
+
+  async function signUp(entryId, slotId, personId, from, to) {
+    if (!personId || !onSignUpRequest) return;
+    setSignupError('');
+    try {
+      await onSignUpRequest(show.id, entryId, slotId, personId, from, to);
+    } catch (err) {
+      setSignupError(err?.message || 'That sign-up could not be saved.');
+    }
+  }
+
+  async function withdraw(entryId, slotId, signupId) {
+    if (!onWithdrawRequest) return;
+    setSignupError('');
+    try {
+      await onWithdrawRequest(show.id, entryId, slotId, signupId);
+    } catch (err) {
+      setSignupError(err?.message || 'That sign-up could not be withdrawn.');
+    }
+  }
+
+  function setRoll(entryId, personId, status) {
+    commit(
+      schedule.map((e) => {
+        if (e.id !== entryId) return e;
+        const roll = { ...(e.roll || {}) };
+        if (status === 'pending') delete roll[personId];
+        else roll[personId] = status;
+        return { ...e, roll };
+      })
+    );
   }
 
   const year = calendarDate.getFullYear();
@@ -734,15 +1574,61 @@ export function ScheduleModule({
   const selectedEntry = schedule.find((e) => e.id === selectedId);
   const mineView = view === 'mine';
 
-  const exportRows = () =>
-    (mineView ? sorted.filter((e) => isCalled(e, myPersonIds)) : sorted).map((e) => ({
-      Date: e.date || '',
-      Time: e.time ? formatTime12h(e.time) : '',
-      Entry: e.label || '',
-      Location: e.location || '',
-      Duration: e.durationMinutes ? formatDuration(e.durationMinutes) : '',
-      Notes: e.notes || '',
-    }));
+  const exportRows = () => {
+    const rows = [];
+    const source = mineView ? sorted.filter((e) => isCalled(e, myPersonIds) || mySignups(e, myPersonIds).length > 0) : sorted;
+    source.forEach((e) => {
+      const venue = venueByName(venues, e.location);
+      const base = {
+        Date: e.date || '',
+        Time: e.time ? formatTime12h(e.time) : '',
+        Entry: e.label || '',
+        Place: e.location || '',
+        Address: venue ? venueAddressLine(venue) : '',
+        Duration: e.durationMinutes ? formatDuration(e.durationMinutes) : '',
+        Notes: e.notes || '',
+      };
+      if ((e.slots || []).length === 0) {
+        rows.push({ ...base, Position: '', Needed: '', 'Signed up': '', From: '', Until: '', Roll: '' });
+        return;
+      }
+      e.slots.forEach((slot) => {
+        if ((slot.signups || []).length === 0) {
+          rows.push({ ...base, Position: slot.role || '', Needed: slot.needed, 'Signed up': '', From: '', Until: '', Roll: '' });
+          return;
+        }
+        slot.signups.forEach((su) => {
+          rows.push({
+            ...base,
+            Position: slot.role || '',
+            Needed: slot.needed,
+            'Signed up': personName(rosters, su.personId),
+            From: su.from ? formatTime12h(su.from) : '',
+            Until: su.to ? formatTime12h(su.to) : '',
+            Roll: (e.roll && e.roll[su.personId]) || '',
+          });
+        });
+      });
+    });
+    return rows;
+  };
+
+  const cardProps = {
+    show,
+    rosters,
+    venues,
+    inventory,
+    taxonomies,
+    actingIds,
+    actingName,
+    canManage: canEdit,
+    canTakeRoll: canEdit,
+    onSignUp: signUp,
+    onWithdraw: withdraw,
+    onSetRoll: setRoll,
+  };
+
+  const formProps = { show, rosters, venues, inventory, setInventory, slotOptions };
 
   return (
     <div>
@@ -754,7 +1640,7 @@ export function ScheduleModule({
             sample={scheduleSpec.sample}
             onImport={(rows) => {
               const items = rows.map((r) => scheduleSpec.build(r, { show }));
-              onScheduleChange(show.id, [...schedule, ...items]);
+              commit([...schedule, ...items]);
               return items.length;
             }}
           />
@@ -775,32 +1661,49 @@ export function ScheduleModule({
         )}
       </div>
 
-      {adding && !mineView && (
-        <ScheduleEntryForm show={show} rosters={rosters} onSave={addEntry} onCancel={() => setAdding(false)} />
+      {signupError && (
+        <div
+          role="alert"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, background: COLOR.card, border: `1px solid ${COLOR.amber}`, borderLeft: `3px solid ${COLOR.amber}`, borderRadius: 4, padding: '9px 13px', marginBottom: 14 }}
+        >
+          <span className="td-body" style={{ fontSize: 12.5, color: COLOR.textPrimary, flex: 1 }}>{signupError}</span>
+          <button onClick={() => setSignupError('')} className="td-focusable td-view-control" style={{ background: 'none', border: 'none', color: COLOR.textFaint, cursor: 'pointer', fontSize: 11.5 }}>
+            Dismiss
+          </button>
+        </div>
       )}
+
+      {canEdit && (
+        <ActingAsBar rosters={rosters} show={show} myPersonIds={myPersonIds} actingId={actingId} setActingId={setActingId} />
+      )}
+
+      {adding && !mineView && <ScheduleEntryForm {...formProps} onSave={addEntry} onCancel={() => setAdding(false)} />}
 
       {mineView ? (
         <MyCallsView
           show={show}
           rosters={rosters}
+          venues={venues}
+          inventory={inventory}
           taxonomies={taxonomies}
           sorted={sorted}
           myPersonIds={myPersonIds}
           myUserId={myUserId}
+          actingIds={actingIds}
+          onSignUp={signUp}
+          onWithdraw={withdraw}
         />
       ) : view === 'list' ? (
         sorted.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {sorted.map((entry) =>
               editingId === entry.id ? (
-                <ScheduleEntryForm key={entry.id} show={show} rosters={rosters} initial={entry} onSave={saveEntry} onCancel={() => setEditingId(null)} />
+                <ScheduleEntryForm key={entry.id} {...formProps} initial={entry} onSave={saveEntry} onCancel={() => setEditingId(null)} />
               ) : (
                 <ScheduleEntryCard
                   key={entry.id}
                   entry={entry}
-                  show={show}
-                  rosters={rosters}
-                  taxonomies={taxonomies}
+                  {...cardProps}
                   onEdit={() => { setEditingId(entry.id); setAdding(false); }}
                   onRemove={() => removeEntry(entry.id)}
                 />
@@ -808,16 +1711,19 @@ export function ScheduleModule({
             )}
           </div>
         ) : (
-          <StubPanel label={`No schedule entries for ${show.title} yet`} hint="Use Add schedule entry, top right, to log load-in, rehearsals, tech week and strike. The callboard builds its calls from these dates, so the schedule comes before Calls." />
+          <StubPanel
+            label={`No schedule entries for ${show.title} yet`}
+            hint="Use Add schedule entry, top right, to log load-in, rehearsals, tech week, performances and strike. Each entry is also its call sheet: where it is, who is called, which positions still need bodies, and what gear comes out."
+          />
         )
       ) : (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <button onClick={() => setCalendarDate(new Date(year, month - 1, 1))} className="td-focusable" style={{ background: 'none', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, padding: '5px 10px', cursor: 'pointer' }}>
+            <button onClick={() => setCalendarDate(new Date(year, month - 1, 1))} className="td-focusable td-view-control" style={{ background: 'none', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, padding: '5px 10px', cursor: 'pointer' }}>
               ‹
             </button>
             <span className="td-display" style={{ fontSize: 15, color: COLOR.textPrimary, letterSpacing: '0.02em' }}>{monthLabel}</span>
-            <button onClick={() => setCalendarDate(new Date(year, month + 1, 1))} className="td-focusable" style={{ background: 'none', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, padding: '5px 10px', cursor: 'pointer' }}>
+            <button onClick={() => setCalendarDate(new Date(year, month + 1, 1))} className="td-focusable td-view-control" style={{ background: 'none', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, padding: '5px 10px', cursor: 'pointer' }}>
               ›
             </button>
           </div>
@@ -848,30 +1754,35 @@ export function ScheduleModule({
                   >
                     <div className="td-mono" style={{ fontSize: 9.5, color: isToday ? COLOR.amber : COLOR.textFaint, marginBottom: 3 }}>{day.getDate()}</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {dayEntries.map((e) => (
-                        <button
-                          key={e.id}
-                          onClick={() => setSelectedId(e.id)}
-                          className="td-focusable"
-                          style={{
-                            background: selectedId === e.id ? COLOR.amber : COLOR.card,
-                            color: selectedId === e.id ? COLOR.void : COLOR.textMuted,
-                            border: 'none',
-                            borderLeft: e.isTechWeek ? `2px solid ${selectedId === e.id ? COLOR.void : COLOR.amber}` : 'none',
-                            borderRadius: 2,
-                            padding: '2px 4px',
-                            fontSize: 9,
-                            fontFamily: "'IBM Plex Mono', monospace",
-                            textAlign: 'left',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          {e.label}
-                        </button>
-                      ))}
+                      {dayEntries.map((e) => {
+                        const short = (e.slots || []).some((s) => !isFullyCovered(e, s));
+                        return (
+                          <button
+                            key={e.id}
+                            onClick={() => setSelectedId(e.id)}
+                            className="td-focusable td-view-control"
+                            title={short ? 'Positions still short' : undefined}
+                            style={{
+                              background: selectedId === e.id ? COLOR.amber : COLOR.card,
+                              color: selectedId === e.id ? COLOR.void : COLOR.textMuted,
+                              border: 'none',
+                              borderLeft: e.isTechWeek ? `2px solid ${selectedId === e.id ? COLOR.void : COLOR.amber}` : 'none',
+                              borderRadius: 2,
+                              padding: '2px 4px',
+                              fontSize: 9,
+                              fontFamily: "'IBM Plex Mono', monospace",
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {short ? '• ' : ''}
+                            {e.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -882,13 +1793,11 @@ export function ScheduleModule({
           {selectedEntry && (
             <div style={{ marginTop: 18 }}>
               {editingId === selectedEntry.id ? (
-                <ScheduleEntryForm show={show} rosters={rosters} initial={selectedEntry} onSave={saveEntry} onCancel={() => setEditingId(null)} />
+                <ScheduleEntryForm {...formProps} initial={selectedEntry} onSave={saveEntry} onCancel={() => setEditingId(null)} />
               ) : (
                 <ScheduleEntryCard
                   entry={selectedEntry}
-                  show={show}
-                  rosters={rosters}
-                  taxonomies={taxonomies}
+                  {...cardProps}
                   onEdit={() => setEditingId(selectedEntry.id)}
                   onRemove={() => removeEntry(selectedEntry.id)}
                 />

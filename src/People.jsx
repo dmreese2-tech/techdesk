@@ -1223,10 +1223,10 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
           {/* View toggle: grouped cards (default, organized by department) vs
               a flat table — one line per person with contact details laid out
               in columns, for scanning or printing a callsheet-style list. */}
-          <div style={{ display: 'flex', border: `1px solid ${COLOR.line}`, borderRadius: 3, overflow: 'hidden' }}>
+          <div className="td-view-control" style={{ display: 'flex', border: `1px solid ${COLOR.line}`, borderRadius: 3, overflow: 'hidden' }}>
             <button
               onClick={() => setView('grouped')}
-              className="td-focusable"
+              className="td-focusable td-view-control"
               title="Grouped view"
               aria-label="Grouped view"
               aria-pressed={view === 'grouped'}
@@ -1247,7 +1247,7 @@ export function PeopleModule({ show, shows, people, setPeople, currentUserId, se
             </button>
             <button
               onClick={() => setView('table')}
-              className="td-focusable"
+              className="td-focusable td-view-control"
               title="Table view"
               aria-label="Table view"
               aria-pressed={view === 'table'}

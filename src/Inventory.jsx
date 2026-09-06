@@ -39,7 +39,7 @@ export function StockBar({ item }) {
 // ASSET CARD — styled like an equipment tag: asset number up top, the way
 // it'd read printed on the DYMO label taped to the case.
 // ---------------------------------------------------------------------------
-export function ItemCard({ item, shows, calls, onOpen, INVENTORY_CATEGORIES }) {
+export function ItemCard({ item, shows, onOpen, INVENTORY_CATEGORIES }) {
   // Categories are departments now, and a department can stop keeping stock or
   // be removed outright. An item filed under one that's gone still has to draw
   // — it is exactly the row somebody needs to find and re-file.
@@ -134,7 +134,7 @@ export function ItemCard({ item, shows, calls, onOpen, INVENTORY_CATEGORIES }) {
     </div>
   );
 }
-export function ItemDetailPanel({ item, shows, calls, locations, setInventory, onBack, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
+export function ItemDetailPanel({ item, shows, locations, setInventory, onBack, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
   const [editingInfo, setEditingInfo] = useState(false);
   const [infoDraft, setInfoDraft] = useState({ name: item.name, location: item.location, totalQty: item.totalQty });
 
@@ -169,7 +169,11 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
   const outOfService = itemOutOfService(item);
   const available = item.totalQty - checkedOut - outOfService;
   const conflicts = itemConflicts(item, shows);
-  const showCallsForNew = calls.filter((c) => c.showId === newShowId);
+  // Gear used to be pulled for a `call`; calls are schedule entries now, so
+  // the picker reads the chosen show's own schedule rather than a second table.
+  const entriesForNewShow = ((shows.find((sh) => sh.id === newShowId) || {}).schedule || [])
+    .slice()
+    .sort((a, b) => (a.date === b.date ? String(a.time || '').localeCompare(String(b.time || '')) : String(a.date).localeCompare(String(b.date))));
   const category = INVENTORY_CATEGORIES[item.category] || { label: item.category || 'Uncategorised', icon: Box };
   const Icon = category.icon || Box;
 
@@ -192,7 +196,7 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
 
   function addAssignment() {
     if (!newShowId) return;
-    const assignment = { id: `ia-${item.id}-${Date.now()}`, showId: newShowId, callId: newCallId || null, qty: Math.max(1, Number(newQty) || 1) };
+    const assignment = { id: `ia-${item.id}-${Date.now()}`, showId: newShowId, entryId: newCallId || null, qty: Math.max(1, Number(newQty) || 1) };
     setInventory((prev) => prev.map((i) => (i.id === item.id ? { ...i, assignments: [...(i.assignments || []), assignment] } : i)));
     setAssigning(false);
     setNewCallId('');
@@ -295,7 +299,11 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
           {item.assignments.map((a) => {
             const s = shows.find((sh) => sh.id === a.showId);
-            const c = a.callId ? calls.find((cc) => cc.id === a.callId) : null;
+            // Legacy rows carry `callId`; migration 22 rewrites them to
+            // `entryId`, and this reads either so an unmigrated project still
+            // shows what its gear is pulled for.
+            const linkedId = a.entryId || a.callId || null;
+            const c = linkedId && s ? (s.schedule || []).find((e) => e.id === linkedId) : null;
             return (
               <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
                 <span className="td-mono" style={{ fontSize: 12, color: COLOR.amber, flex: 1 }}>
@@ -323,7 +331,7 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
           </select>
           <select className="td-focusable" value={newCallId} onChange={(e) => setNewCallId(e.target.value)} style={inputStyle}>
             <option value="">Whole run</option>
-            {showCallsForNew.map((c) => (
+            {entriesForNewShow.map((c) => (
               <option key={c.id} value={c.id}>{c.label} · {formatShortDate(c.date)}</option>
             ))}
           </select>
@@ -429,7 +437,7 @@ export function ItemDetailPanel({ item, shows, calls, locations, setInventory, o
     </div>
   );
 }
-export function NewItemForm({ show, calls, locations, onAdd, onClose, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
+export function NewItemForm({ show, locations, onAdd, onClose, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('electrics');
   const [totalQty, setTotalQty] = useState(1);
@@ -447,7 +455,7 @@ export function NewItemForm({ show, calls, locations, onAdd, onClose, INVENTORY_
     width: '100%',
   };
   const labelStyle = { fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 5, display: 'block' };
-  const sortedCalls = calls.slice().sort((a, b) => (a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)));
+  const sortedEntries = ((show && show.schedule) || []).slice().sort((a, b) => (a.date === b.date ? String(a.time || '').localeCompare(String(b.time || '')) : String(a.date).localeCompare(String(b.date))));
 
   return (
     <div style={{ background: COLOR.card, border: `1px solid ${COLOR.lineBright}`, borderRadius: 4, padding: 18, marginBottom: 20 }}>
@@ -498,7 +506,7 @@ export function NewItemForm({ show, calls, locations, onAdd, onClose, INVENTORY_
             <select className="td-focusable" style={inputStyle} value={pullFor} onChange={(e) => setPullFor(e.target.value)}>
               <option value="none">General stock (not tied to a show)</option>
               <option value="show">{show.title} — whole run</option>
-              {sortedCalls.map((c) => (
+              {sortedEntries.map((c) => (
                 <option key={c.id} value={c.id}>{show.title} — {c.label} · {formatShortDate(c.date)}</option>
               ))}
             </select>
@@ -541,7 +549,7 @@ export function NewItemForm({ show, calls, locations, onAdd, onClose, INVENTORY_
             purchaseNotes: '',
             assignments:
               show && pullFor !== 'none'
-                ? [{ id: `ia-new-${Date.now()}`, showId: show.id, callId: pullFor === 'show' ? null : pullFor, qty: pullQty }]
+                ? [{ id: `ia-new-${Date.now()}`, showId: show.id, entryId: pullFor === 'show' ? null : pullFor, qty: pullQty }]
                 : [],
           })
         }
@@ -566,7 +574,7 @@ export function NewItemForm({ show, calls, locations, onAdd, onClose, INVENTORY_
 // ---------------------------------------------------------------------------
 // INVENTORY MODULE
 // ---------------------------------------------------------------------------
-export function InventoryModule({ show, shows, calls, inventory, setInventory, locations, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
+export function InventoryModule({ show, shows, inventory, setInventory, locations, INVENTORY_CATEGORIES, INVENTORY_CATEGORY_ORDER }) {
   const [category, setCategory] = useState('all');
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [conflictsOnly, setConflictsOnly] = useState(false);
@@ -590,7 +598,7 @@ export function InventoryModule({ show, shows, calls, inventory, setInventory, l
   const openItem = openItemId ? inventory.find((i) => i.id === openItemId) : null;
 
   if (openItem) {
-    return <ItemDetailPanel item={openItem} shows={shows} calls={calls} locations={locations} setInventory={setInventory} onBack={() => setOpenItemId(null)} INVENTORY_CATEGORIES={INVENTORY_CATEGORIES} INVENTORY_CATEGORY_ORDER={INVENTORY_CATEGORY_ORDER} />;
+    return <ItemDetailPanel item={openItem} shows={shows} locations={locations} setInventory={setInventory} onBack={() => setOpenItemId(null)} INVENTORY_CATEGORIES={INVENTORY_CATEGORIES} INVENTORY_CATEGORY_ORDER={INVENTORY_CATEGORY_ORDER} />;
   }
 
   return (
@@ -739,7 +747,6 @@ export function InventoryModule({ show, shows, calls, inventory, setInventory, l
       {showForm && (
         <NewItemForm
           show={show}
-          calls={show ? calls.filter((c) => c.showId === show.id) : []}
           locations={locations}
           onAdd={(item) => {
             setInventory((prev) => [item, ...prev]);
@@ -758,7 +765,6 @@ export function InventoryModule({ show, shows, calls, inventory, setInventory, l
               key={item.id}
               item={item}
               shows={shows}
-              calls={calls}
               onOpen={() => setOpenItemId(item.id)}
               INVENTORY_CATEGORIES={INVENTORY_CATEGORIES}
             />

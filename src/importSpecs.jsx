@@ -25,18 +25,28 @@ const C = (key, required = false) => ({ key, required });
 // --- Schedule ---------------------------------------------------------------
 export const scheduleSpec = {
   filename: 'schedule',
-  columns: [C('Label', true), C('Date', true), C('Time'), C('Minutes'), C('Location'), C('Notes')],
-  sample: { Label: 'Load-in', Date: '2026-10-01', Time: '09:00', Minutes: '480', Location: 'Mainstage', Notes: 'Full crew call' },
+  columns: [C('Label', true), C('Date', true), C('Time'), C('Minutes'), C('Place'), C('Notes')],
+  sample: { Label: 'Load-in', Date: '2026-10-01', Time: '09:00', Minutes: '480', Place: 'Mainstage', Notes: 'Full crew call' },
   build: (r) => ({
     id: uid('sch'),
     label: r.get('Label'),
     date: parseDateLoose(r.get('Date')),
     time: parseTimeLoose(r.get('Time')) || '09:00',
     durationMinutes: num(r.get('Minutes'), 120),
-    location: r.get('Location') || '',
+    // Place is matched by name against Settings -> Places. A name that isn't
+    // there imports as typed and is flagged on the entry rather than dropped,
+    // so a spreadsheet with a room the company hasn't set up yet still lands.
+    location: r.get('Place') || r.get('Location') || '',
     notes: r.get('Notes') || '',
     breaks: [],
-    attendance: { crew: [], actors: [], musicians: [], staff: [] },
+    // `called`, not `attendance` — attendance meant two things once calls
+    // folded in, and now means neither. Positions and sign-ups aren't
+    // importable: they're claimed in the app, not typed in a spreadsheet.
+    called: { crew: [], actors: [], musicians: [], staff: [] },
+    roll: {},
+    openSignup: false,
+    slots: [],
+    sceneIds: [],
   }),
 };
 

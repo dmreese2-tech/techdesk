@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { venueList } from './shared.jsx';
 
 // =============================================================================
 // PERSISTENCE (Supabase) — same job as the IndexedDB module this replaces:
@@ -184,7 +185,9 @@ const DEFAULT_TAXONOMY_JSON = { departments: {}, departmentOrder: [], castTypes:
 function settingsRowToJs(row) {
   if (!row) return { venues: [], locations: [], instruments: [], logoUrl: '', positions: { crew: [], musician: [], staff: [] }, ...DEFAULT_TAXONOMY_JSON };
   return {
-    venues: row.venues || [],
+    // Places became objects when they gained addresses. normalizeVenue reads
+    // either shape, so a project still holding bare strings loads fine.
+    venues: venueList(row.venues || []),
     locations: row.locations || [],
     instruments: row.instruments || [],
     logoUrl: row.logo_url || '',
@@ -352,7 +355,7 @@ export async function saveCueSheetForShow(showId, cues, orgId) {
 export async function saveSettings(settings, orgId) {
   const row = {
     org_id: orgId,
-    venues: settings.venues,
+    venues: venueList(settings.venues),
     locations: settings.locations,
     instruments: settings.instruments,
     logo_url: settings.logoUrl || null,
@@ -428,4 +431,44 @@ export function subscribeToOrgChanges(orgId, onChange) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'org_settings', filter: `org_id=eq.${orgId}` }, onChange)
     .subscribe();
   return () => supabase.removeChannel(channel);
+}
+
+// ---------------------------------------------------------------------------
+// OPEN SIGN-UPS
+//
+// These do NOT go through the ordinary show_items save path. A sign-up is an
+// edit to a `schedule` show_item, and that write is gated on
+// can_write(org, show, 'schedule') — which cast, band and general hands do not
+// have. They are exactly who open sign-ups are for.
+//
+// So the mutation lives in a security definer function that owns the rules:
+// see supabase/24-schedule-signup-rpc.sql. It returns the updated entry, which
+// the caller applies through the same remote-sync path the realtime refetch
+// uses, so the autosave hook treats it as the server's answer and never tries
+// to re-save a row it is not allowed to write.
+// ---------------------------------------------------------------------------
+export async function scheduleSignUp(orgId, showId, entryId, slotId, personId, from, to) {
+  const { data, error } = await supabase.rpc('schedule_signup', {
+    p_org: orgId,
+    p_show: showId,
+    p_entry_id: entryId,
+    p_slot_id: slotId,
+    p_person_id: personId,
+    p_from: from || '',
+    p_to: to || '',
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function scheduleWithdraw(orgId, showId, entryId, slotId, signupId) {
+  const { data, error } = await supabase.rpc('schedule_withdraw', {
+    p_org: orgId,
+    p_show: showId,
+    p_entry_id: entryId,
+    p_slot_id: slotId,
+    p_signup_id: signupId,
+  });
+  if (error) throw error;
+  return data;
 }

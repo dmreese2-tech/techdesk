@@ -14,7 +14,7 @@ import { supabase } from './supabaseClient.js';
 // missing on purpose: the vocabulary of the company is admin-only.
 export const GRANTABLE_MODULES = [
   { key: 'production', label: 'Production', note: 'Title, venue, director, dates and phase.' },
-  { key: 'schedule', label: 'Schedule', note: 'Rehearsal and performance calendar.' },
+  { key: 'schedule', label: 'Schedule', note: 'The calendar and the callboard: dates, places, who is called, open positions, sign-ups and roll.' },
   { key: 'scenes', label: 'Scenes', note: 'Acts and scenes — the spine everything else references.' },
   { key: 'characters', label: 'Characters', note: 'The role list for this production.' },
   { key: 'crew', label: 'Crew', note: 'Crew roster and show assignments.' },
@@ -24,8 +24,6 @@ export const GRANTABLE_MODULES = [
   { key: 'choreography', label: 'Choreography', note: 'Numbers, and who is in them.' },
   { key: 'costumes', label: 'Costumes', note: 'What each character wears, scene by scene.' },
   { key: 'props', label: 'Props', note: 'The props list and who handles each one.' },
-  { key: 'calls', label: 'Calls', note: 'Call sheets, slots and attendance.' },
-  { key: 'groups', label: 'Call groups', note: 'Named groups used to fill calls quickly.' },
   { key: 'audio', label: 'Audio', note: 'Mic, DI and playback channels.' },
   { key: 'set', label: 'Set', note: 'Set pieces and where they live.' },
   { key: 'runofshow', label: 'Run of Show', note: 'Cue sheets.' },
@@ -33,7 +31,20 @@ export const GRANTABLE_MODULES = [
   { key: 'links', label: 'Links', note: 'Headshots, bios, references, marketing, social, line learning — the standing list of off-site links for the show.' },
 ];
 
-export const MODULE_LABELS = Object.fromEntries(GRANTABLE_MODULES.map((m) => [m.key, m.label]));
+// Retired grants. `calls` and `groups` were the callboard, which is now part of
+// the schedule. They are kept out of GRANTABLE_MODULES so nobody can hand out a
+// grant that grants nothing, but the keys stay live in the database until every
+// position has been re-ticked — dropping them from can_write() first would
+// silently take the callboard away from every stage manager who had `calls` but
+// not `schedule`. Migration 22 copies the grant across; this is the belt to that
+// migration's braces.
+export const RETIRED_MODULES = ['calls', 'groups'];
+
+export const MODULE_LABELS = {
+  ...Object.fromEntries(GRANTABLE_MODULES.map((m) => [m.key, m.label])),
+  calls: 'Schedule',
+  groups: 'Schedule',
+};
 
 const EVERYTHING = GRANTABLE_MODULES.map((m) => m.key);
 
@@ -46,9 +57,9 @@ export const POSITION_DEFAULTS = {
   'director': { modules: ['production', 'scenes', 'characters', 'actors', 'schedule'], companyWide: true },
   'assistant director': { modules: ['production', 'scenes', 'characters', 'actors', 'schedule'], companyWide: true },
 
-  'production manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script', 'links'] },
-  'stage manager': { modules: ['schedule', 'calls', 'groups', 'runofshow', 'scenes', 'script', 'links'] },
-  'assistant stage manager': { modules: ['calls', 'groups', 'runofshow'] },
+  'production manager': { modules: ['schedule', 'runofshow', 'scenes', 'script', 'links'] },
+  'stage manager': { modules: ['schedule', 'runofshow', 'scenes', 'script', 'links'] },
+  'assistant stage manager': { modules: ['schedule', 'runofshow'] },
 
   // `inventory` holds CATEGORY KEYS, not labels — the same keys the stock
   // departments use. can_write_inventory() tests them with jsonb `?`, which is

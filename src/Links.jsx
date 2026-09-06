@@ -320,7 +320,7 @@ export function LinksModule({ show, setShows }) {
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
-              className="td-focusable"
+              className="td-focusable td-view-control"
               style={{
                 background: filter === f.id ? COLOR.amber : 'transparent',
                 color: filter === f.id ? COLOR.void : COLOR.textMuted,
