@@ -1078,9 +1078,13 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
               inventory={inventory}
               setInventory={setInventory}
               slotOptions={{
-                crew: positions.crew,
-                staff: positions.staff,
-                musician: positions.musician,
+                // positionNames, not the raw lists: since the department merge
+                // a position is { name, dept }, and every other picker in the
+                // app unwraps it here. Passing the objects straight through
+                // renders one as a React child and takes the page out.
+                crew: positionNames(positions.crew),
+                staff: positionNames(positions.staff),
+                musician: positionNames(positions.musician),
                 actor: (currentShow?.characters || []).map((c) => c.name),
               }}
               onScheduleChange={updateShowSchedule}

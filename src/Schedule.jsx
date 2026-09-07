@@ -311,7 +311,17 @@ function Field({ label, children }) {
 // back to free text for a person type whose list hasn't been set up yet.
 // ---------------------------------------------------------------------------
 export function SlotRoleField({ personType, value, onChange, slotOptions, style, placeholder }) {
-  const options = (slotOptions && slotOptions[personType]) || [];
+  // Coerce to strings. Callers are supposed to hand over names, but a position
+  // is `{ name, dept }` since the department merge, and handing the objects
+  // straight to <option> renders one as a React child and takes the whole page
+  // down with a black screen — no message, no boundary. This has bitten the
+  // codebase three times in other props. Normalising here is cheap and turns a
+  // wrong prop into a wrong label instead of an outage.
+  const options = [...new Set(
+    ((slotOptions && slotOptions[personType]) || [])
+      .map((o) => (typeof o === 'string' ? o : o && (o.name || o.label) ? String(o.name || o.label) : ''))
+      .filter(Boolean)
+  )];
   if (!options.length) {
     return <input className="td-focusable" style={style} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />;
   }
