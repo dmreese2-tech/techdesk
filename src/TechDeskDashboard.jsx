@@ -615,7 +615,12 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
   // migration yet.
   useEffect(() => {
     if (!orgId) return undefined;
-    const touch = () => { supabase.rpc('touch_member_activity', { check_org_id: orgId }).catch(() => {}); };
+    // supabase-js's rpc() builder is a thenable, not a real Promise — it has
+    // .then but not .catch, and calling .catch on it throws. It also doesn't
+    // reject on a database error; that comes back as { error } inside the
+    // resolved value, which this silently ignores — a company that hasn't
+    // run supabase/23-members-last-activity.sql yet just gets a no-op here.
+    const touch = () => { supabase.rpc('touch_member_activity', { check_org_id: orgId }).then(() => {}); };
     touch();
     const interval = setInterval(touch, 5 * 60 * 1000);
     return () => clearInterval(interval);
