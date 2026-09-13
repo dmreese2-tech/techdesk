@@ -602,6 +602,25 @@ export default function TechDeskDashboard({ orgId, onSignOut, onChangeCompany })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
+  // Last-active heartbeat — the People table's "last login" column used to
+  // read straight from Supabase auth, which only moves when a brand new
+  // session is created. A tab left open all day renews its session from the
+  // refresh token without ever creating one, so someone actively working
+  // showed as "last seen" whenever they last actually signed in, days
+  // earlier. This bumps a plain timestamp instead, on a schedule cheap
+  // enough to just leave running: once as soon as the app is up, then every
+  // few minutes for as long as the tab stays open. See
+  // supabase/23-members-last-activity.sql and touch_member_activity — it
+  // no-ops harmlessly (and silently) on a company that hasn't run that
+  // migration yet.
+  useEffect(() => {
+    if (!orgId) return undefined;
+    const touch = () => { supabase.rpc('touch_member_activity', { check_org_id: orgId }).catch(() => {}); };
+    touch();
+    const interval = setInterval(touch, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [orgId]);
+
   // Realtime — when anyone else on the team changes shared data, refetch
   // and replace local state. Simple "go get the truth again" rather than
   // patching individual fields client-side, which is much easier to get

@@ -76,20 +76,34 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote, h
   const iAmAdmin = !!members && members.some((m) => m.user_id === me && tierOf(m) === 'admin');
 
   // Three states worth telling apart, because they mean different things to an
-  // admin chasing somebody: signed in on a date, an account that exists and has
-  // never been used, and a database that has not had 20-members-last-login.sql
-  // run yet — where the honest answer is "we don't know", not "never".
+  // admin chasing somebody: active on a date, an account that exists and has
+  // never been used, and a database that has not had the last-login/activity
+  // migrations run yet — where the honest answer is "we don't know", not
+  // "never".
+  //
+  // last_sign_in_at only moves when Supabase creates a brand new session; a
+  // tab left open all day renews its existing session from the refresh token
+  // without ever touching it, so it can read days stale for someone who has
+  // been in the app the whole time. last_active_at is the fix — the client
+  // heartbeats it to now() every few minutes while the app is actually open
+  // (see touch_member_activity in supabase/23-members-last-activity.sql) — so
+  // it's preferred whenever it's present, with last_sign_in_at as the
+  // fallback for a company that hasn't run that migration yet, or for a
+  // member whose app hasn't reloaded since it did.
   const lastLoginOf = (m) => {
     if (!('last_sign_in_at' in (m || {}))) {
-      return { label: '—', tone: 'unknown', note: 'Last login is not being reported yet. Run supabase/20-members-last-login.sql.' };
+      return { label: '—', tone: 'unknown', note: 'Last activity is not being reported yet. Run supabase/20-members-last-login.sql and supabase/23-members-last-activity.sql.' };
     }
-    if (!m.last_sign_in_at) {
+    const active = m.last_active_at ? new Date(m.last_active_at) : null;
+    const signedIn = m.last_sign_in_at ? new Date(m.last_sign_in_at) : null;
+    const when = active && (!signedIn || active >= signedIn) ? active : signedIn;
+    if (!when) {
       return { label: 'Never', tone: 'never', note: 'This account exists but has never been signed into. The invite may not have landed.' };
     }
-    const when = new Date(m.last_sign_in_at);
     const days = Math.floor((Date.now() - when.getTime()) / 86400000);
     const ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
-    return { label: when.toLocaleDateString(), tone: 'seen', note: `Last signed in ${ago}, at ${when.toLocaleString()}.` };
+    const verb = when === active ? 'Last active' : 'Last signed in';
+    return { label: when.toLocaleDateString(), tone: 'seen', note: `${verb} ${ago}, at ${when.toLocaleString()}.` };
   };
 
   // The roster person an account is linked to, if any.
@@ -170,7 +184,7 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote, h
     access: (a, b) => (ACCESS_RANK[a._access.tone] ?? 9) - (ACCESS_RANK[b._access.tone] ?? 9),
     email: (a, b) => (a.email || '').localeCompare(b.email || ''),
     joined: (a, b) => new Date(a.joined_at || 0) - new Date(b.joined_at || 0),
-    lastLogin: (a, b) => new Date(a.last_sign_in_at || 0) - new Date(b.last_sign_in_at || 0),
+    lastLogin: (a, b) => new Date(a.last_active_at || a.last_sign_in_at || 0) - new Date(b.last_active_at || b.last_sign_in_at || 0),
     type: (a, b) => (TYPE_RANK[tierOf(a)] ?? 9) - (TYPE_RANK[tierOf(b)] ?? 9),
   };
 
@@ -377,7 +391,7 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote, h
                   <tr>
                     {[
                       ['Name', 'name'], ['Position', 'position'], ['Access', 'access'], ['Email', 'email'],
-                      ['Joined', 'joined'], ['Last login', 'lastLogin'], ['Type', 'type'], ['', null],
+                      ['Joined', 'joined'], ['Last active', 'lastLogin'], ['Type', 'type'], ['', null],
                     ].map(([h, key], i) => (
                       <th
                         key={h || `a${i}`}
