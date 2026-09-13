@@ -40,6 +40,11 @@ const SHOW_MODULES = {
   props: 'props',
   set: 'setPieces',
   audio: 'soundEffects',
+  // Mix buses, matrices, and the output-port patch. A different module from
+  // `audio` (sound effects) because the two are edited and cleaned up on
+  // independent schedules — deleting every sound effect shouldn't touch the
+  // bus structure, and vice versa.
+  audioRouting: 'audioRouting',
   groups: 'groups',
   // Script versions: the same production's pages marked up for choreography,
   // for cues, for blocking. Siblings, not revisions of one another.
@@ -92,6 +97,9 @@ function showRowToJs(row, itemsForShow) {
     // otherwise deleting the last prop would resurrect the column's copy.
     schedule: itemsForShow ? itemsForShow.schedule || [] : row.schedule || [],
     soundEffects: itemsForShow ? itemsForShow.audio || [] : row.sound_effects || [],
+    // No legacy column ever held this either — it was born as a show_items
+    // module, same as links.
+    audioRouting: itemsForShow ? itemsForShow.audioRouting || [] : [],
     choreography: itemsForShow ? itemsForShow.choreography || [] : row.choreography || [],
     acts: itemsForShow ? itemsForShow.scenes || [] : row.acts || [],
     characters: itemsForShow ? itemsForShow.characters || [] : row.characters || [],

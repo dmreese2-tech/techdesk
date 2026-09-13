@@ -1134,6 +1134,15 @@ export function formatDuration(mins) {
   return `${m}m`;
 }
 
+// AUDIO OUTPUT PATCH — the physical world downstream of the mixer: 16 output
+// ports total, 8 on the console itself and 8 on the stage box. Fixed by the
+// hardware every show uses, not something a production configures, so it's a
+// constant here rather than data stored on the show.
+export const OUTPUT_PORTS = [
+  ...Array.from({ length: 8 }, (_, i) => ({ id: `board-${i + 1}`, label: `Board Out ${i + 1}`, group: 'Board' })),
+  ...Array.from({ length: 8 }, (_, i) => ({ id: `stage-${i + 1}`, label: `Stage Box Out ${i + 1}`, group: 'Stage box' })),
+];
+
 // Derives the mic plot, DI list, monitor sends, and playback channels live
 // from the actor/musician rosters — never stored separately, so it can't
 // drift out of sync with who's actually mic'd or plugged in.
