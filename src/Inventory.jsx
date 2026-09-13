@@ -626,7 +626,7 @@ export function InventoryModule({ show, shows, inventory, setInventory, location
               'Out of service': itemOutOfService(item),
               Location: item.location || '',
               'Cost per unit': item.costPerUnit ?? 0,
-              'Purchased on': item.purchaseDate || '',
+              'Purchase date': item.purchaseDate || '',
               'Purchased from': item.purchaseSource || '',
               Notes: item.purchaseNotes || '',
             }))

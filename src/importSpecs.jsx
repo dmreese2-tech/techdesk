@@ -261,8 +261,8 @@ export const linksSpec = {
 // --- Inventory --------------------------------------------------------------
 export const inventorySpec = {
   filename: 'inventory',
-  columns: [C('Name', true), C('Category'), C('Asset no'), C('Quantity'), C('Location'), C('Cost per unit'), C('Purchase date'), C('Source'), C('Notes')],
-  sample: { Name: 'ETC Source Four 26°', Category: 'Electrics', 'Asset no': 'LX-0142', Quantity: '24', Location: 'Electrics Cage', 'Cost per unit': '495', 'Purchase date': '2026-01-15', Source: 'BMI Supply', Notes: 'Rep plot' },
+  columns: [C('Name', true), C('Category'), C('Asset no'), C('Quantity'), C('Location'), C('Cost per unit'), C('Purchase date'), C('Purchased from'), C('Notes')],
+  sample: { Name: 'ETC Source Four 26°', Category: 'Electrics', 'Asset no': 'LX-0142', Quantity: '24', Location: 'Electrics Cage', 'Cost per unit': '495', 'Purchase date': '2026-01-15', 'Purchased from': 'BMI Supply', Notes: 'Rep plot' },
   // Category is a department that keeps stock. Matched on the label as typed,
   // and on the key too, so a sheet exported from this app re-imports cleanly.
   build: (r, ctx) => {
@@ -281,7 +281,7 @@ export const inventorySpec = {
       location: r.get('Location') || '',
       costPerUnit: num(r.get('Cost per unit')),
       purchaseDate: parseDateLoose(r.get('Purchase date')) || null,
-      purchaseSource: r.get('Source') || '',
+      purchaseSource: r.get('Purchased from') || '',
       purchaseNotes: r.get('Notes') || '',
       // Every unit starts good. Damage is recorded as it happens, not imported.
       units: Array.from({ length: Math.max(0, qty) }, (_, i) => ({ id: uid(`u${i}`), status: 'ok', note: '', date: null })),
