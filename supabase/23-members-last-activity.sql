@@ -98,15 +98,20 @@ grant execute on function public.org_members_list(uuid) to authenticated;
 -- ---------------------------------------------------------------------------
 -- Check
 -- ---------------------------------------------------------------------------
+-- Picks the first org itself rather than asking you to paste an id in —
+-- Supabase's SQL editor runs a pasted script as one transaction, so a typo'd
+-- placeholder here used to roll back everything above it too, silently.
+--
 -- Right after this runs, last_active_at is null for everyone — that's
 -- expected, nobody's client has called the heartbeat yet. Have someone with
--- the app open reload, wait a few seconds, and re-run this: their row should
--- show a fresh last_active_at.
+-- the app open reload, wait a few seconds, and re-run just this select:
+-- their row should show a fresh last_active_at.
 select
-  email,
-  person_name,
-  tier,
-  last_sign_in_at,
-  last_active_at
-from public.org_members_list('<your org id>'::uuid)
-order by last_active_at desc nulls last;
+  m.email,
+  m.person_name,
+  m.tier,
+  m.last_sign_in_at,
+  m.last_active_at
+from orgs o
+cross join lateral public.org_members_list(o.id) m
+order by o.id, m.last_active_at desc nulls last;
