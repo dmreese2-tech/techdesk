@@ -27,6 +27,20 @@ export default function Auth({ onReady, forcePicker = false }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Forgot-password flow, entirely separate from sign-in/sign-up mode above.
+  // 'request' shows the email form, 'sent' shows the confirmation.
+  const [resetStage, setResetStage] = useState(null); // null | 'request' | 'sent'
+  const [resetEmail, setResetEmail] = useState('');
+
+  // Set once Supabase reports a PASSWORD_RECOVERY auth event — the session
+  // created when someone follows the emailed reset link. It overrides every
+  // other screen below until they actually pick a new password, so a stale
+  // recovery link can never drop someone straight into the dashboard on
+  // whatever account it belonged to.
+  const [recovery, setRecovery] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   const [orgs, setOrgs] = useState(null); // null = loading, [] = none yet
   const [orgMode, setOrgMode] = useState('create'); // 'create' | 'join'
   const [newOrgName, setNewOrgName] = useState('');
@@ -37,7 +51,13 @@ export default function Auth({ onReady, forcePicker = false }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      // Fires once, right when the recovery link's session is established.
+      // Everything else in this component keeps working off `session` as
+      // normal; this just also raises the gate below.
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -97,6 +117,51 @@ export default function Auth({ onReady, forcePicker = false }) {
       }
     } catch (err) {
       setError(err.message || 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSendReset(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      // redirectTo brings them back to this same app (not the bare Supabase
+      // domain), where the PASSWORD_RECOVERY listener above takes over.
+      const { error: err } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), {
+        redirectTo: window.location.origin + window.location.pathname,
+      });
+      if (err) throw err;
+      setResetStage('sent');
+    } catch (err) {
+      // Deliberately not distinguishing "no such account" from "sent" — that
+      // distinction is exactly how this screen would be used to find out
+      // which emails have accounts here.
+      setError(err.message || 'Could not send a reset email.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSetNewPassword(e) {
+    e.preventDefault();
+    setError('');
+    if (newPassword !== confirmPassword) {
+      setError('Those two passwords don\u2019t match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+      if (err) throw err;
+      setRecovery(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      // Session from the recovery link is already valid, so the effects
+      // above pick up from here exactly as an ordinary sign-in would.
+    } catch (err) {
+      setError(err.message || 'Could not set the new password.');
     } finally {
       setBusy(false);
     }
@@ -167,7 +232,49 @@ export default function Auth({ onReady, forcePicker = false }) {
 
   if (session === undefined) return wrap(<div style={{ color: COLOR.textFaint, textAlign: 'center', fontSize: 12 }}>Loading…</div>);
 
+  // Outranks everything below, session or no session: a recovery link is
+  // only ever followed by someone who could not sign in normally, so it
+  // must not be possible to land in the dashboard, or the org picker,
+  // without going through this first.
+  if (recovery) {
+    return wrap(
+      <form onSubmit={handleSetNewPassword} style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 6, padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ color: COLOR.textMuted, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>Set a new password</div>
+        <input type="password" required minLength={6} autoFocus placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={inputStyle} />
+        <input type="password" required minLength={6} placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={inputStyle} />
+        <button type="submit" disabled={busy} style={{ ...buttonStyle, opacity: busy ? 0.6 : 1 }}>{busy ? 'Working…' : 'Set password'}</button>
+      </form>
+    );
+  }
+
   if (!session) {
+    if (resetStage === 'sent') {
+      return wrap(
+        <div style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 6, padding: 24, textAlign: 'center' }}>
+          <div style={{ color: COLOR.textPrimary, fontSize: 13, marginBottom: 8 }}>Check your email</div>
+          <div style={{ color: COLOR.textFaint, fontSize: 12, lineHeight: 1.5, marginBottom: 16 }}>
+            If {resetEmail} has an account here, a reset link is on its way.
+          </div>
+          <button type="button" onClick={() => { setResetStage(null); setResetEmail(''); }} style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, cursor: 'pointer', textDecoration: 'underline' }}>
+            Back to sign in
+          </button>
+        </div>
+      );
+    }
+
+    if (resetStage === 'request') {
+      return wrap(
+        <form onSubmit={handleSendReset} style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 6, padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ color: COLOR.textMuted, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>Reset your password</div>
+          <input type="email" required autoFocus placeholder="Email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} style={inputStyle} />
+          <button type="submit" disabled={busy} style={{ ...buttonStyle, opacity: busy ? 0.6 : 1 }}>{busy ? 'Sending…' : 'Send reset link'}</button>
+          <button type="button" onClick={() => setResetStage(null)} style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, cursor: 'pointer', textDecoration: 'underline' }}>
+            Back to sign in
+          </button>
+        </form>
+      );
+    }
+
     return wrap(
       <form onSubmit={handleAuth} style={{ background: COLOR.panel, border: `1px solid ${COLOR.line}`, borderRadius: 6, padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
@@ -188,6 +295,15 @@ export default function Auth({ onReady, forcePicker = false }) {
         <button type="submit" disabled={busy} style={{ ...buttonStyle, opacity: busy ? 0.6 : 1 }}>
           {busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'}
         </button>
+        {mode === 'signin' && (
+          <button
+            type="button"
+            onClick={() => { setResetStage('request'); setResetEmail(email); setError(''); }}
+            style={{ background: 'none', border: 'none', color: COLOR.textFaint, fontSize: 11.5, cursor: 'pointer', textDecoration: 'underline', textAlign: 'center' }}
+          >
+            Forgot password?
+          </button>
+        )}
         {mode === 'signup' && (
           <div style={{ color: COLOR.textFaint, fontSize: 11, textAlign: 'center' }}>
             Ask your TD or another admin for your company's invite code — an account can't be created without one.

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Drama, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, LayoutGrid, Link2, ListChecks, LogOut, Music, Package, Radio, Settings, Shirt, Star, Users } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, ArrowDown, ArrowUp, ArrowUpDown, Drama, Box, Boxes, Briefcase, Building2, CalendarDays, ChevronDown, Clapperboard, FileText, Footprints, KeyRound, LayoutGrid, Link2, ListChecks, LogOut, Mail, Music, Package, Radio, Search, Settings, Shirt, Star, Users } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
 import { STATUS_META, byName, assignmentFor } from './shared.jsx';
@@ -17,7 +17,7 @@ const TIER_META = {
   cast: { label: 'Cast', note: 'Reads only what concerns them. Edits nothing.' },
 };
 
-export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote }) {
+export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote, hideHeader = false }) {
   const [members, setMembers] = useState(null);
   const [claims, setClaims] = useState([]);
   const [unclaimed, setUnclaimed] = useState([]);
@@ -26,6 +26,14 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [positionPerms, setPositionPerms] = useState({});
+
+  // Sorting and filtering are both client-side over the one RPC result —
+  // a company roster tops out in the hundreds, not a page-size problem.
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'admin' | 'staff' | 'cast'
+  const [linkedFilter, setLinkedFilter] = useState('all'); // 'all' | 'linked' | 'unlinked'
 
   const load = async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -64,10 +72,6 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
   // `tier` arrives with 04-accounts-and-identity.sql; until that has run, fall
   // back to the old admin/member role so this panel still works.
   const tierOf = (m) => m.tier || (m.role === 'admin' ? 'admin' : 'staff');
-  // Sorted by the name you would look someone up under, falling back to the
-  // address for an account nobody has linked yet. The RPC returns them by join
-  // date, which is the one order nobody scans a roster in.
-  const sortedMembers = members && [...members].sort((a, b) => byName(a.person_name || a.email, b.person_name || b.email));
   const admins = (members || []).filter((m) => tierOf(m) === 'admin');
   const iAmAdmin = !!members && members.some((m) => m.user_id === me && tierOf(m) === 'admin');
 
@@ -148,6 +152,51 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
     return { label: '—', tone: 'none', note: `Not on ${show.title}, so ${granted.join(', ')} grants nothing here.` };
   };
 
+  // Sorting and filtering both work off this enriched copy, so a column that
+  // is really a derived value — Position, Access, Last login — sorts on the
+  // same thing the cell renders instead of recomputing it a second way.
+  const enriched = (members || []).map((m) => ({
+    ...m,
+    _position: positionFor(m),
+    _access: accessFor(m),
+    _lastLogin: lastLoginOf(m),
+  }));
+
+  const ACCESS_RANK = { wide: 0, show: 1, none: 2, unknown: 2 };
+  const TYPE_RANK = { admin: 0, staff: 1, cast: 2 };
+  const SORTERS = {
+    name: (a, b) => byName(a.person_name || a.email, b.person_name || b.email),
+    position: (a, b) => (a._position || '').localeCompare(b._position || ''),
+    access: (a, b) => (ACCESS_RANK[a._access.tone] ?? 9) - (ACCESS_RANK[b._access.tone] ?? 9),
+    email: (a, b) => (a.email || '').localeCompare(b.email || ''),
+    joined: (a, b) => new Date(a.joined_at || 0) - new Date(b.joined_at || 0),
+    lastLogin: (a, b) => new Date(a.last_sign_in_at || 0) - new Date(b.last_sign_in_at || 0),
+    type: (a, b) => (TYPE_RANK[tierOf(a)] ?? 9) - (TYPE_RANK[tierOf(b)] ?? 9),
+  };
+
+  const q = query.trim().toLowerCase();
+  const filtered = enriched.filter((m) => {
+    if (typeFilter !== 'all' && tierOf(m) !== typeFilter) return false;
+    if (linkedFilter === 'linked' && !m.person_id) return false;
+    if (linkedFilter === 'unlinked' && m.person_id) return false;
+    if (!q) return true;
+    return (m.person_name || '').toLowerCase().includes(q) || (m.email || '').toLowerCase().includes(q);
+  });
+
+  const visibleMembers = [...filtered].sort((a, b) => {
+    const cmp = (SORTERS[sortKey] || SORTERS.name)(a, b);
+    return sortDir === 'desc' ? -cmp : cmp;
+  });
+
+  const toggleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
   const changeTier = async (member, tier) => {
     setBusyId(member.user_id);
     const { error: err } = await supabase.from('org_members').update({ tier }).eq('org_id', orgId).eq('user_id', member.user_id);
@@ -213,13 +262,17 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
-        <span className="td-display" style={sectionTitle}>People</span>
-      </div>
-      <div className="td-body" style={sectionNote}>
-        Accounts, and which roster person each one is. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
-      </div>
+      {!hideHeader && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Users size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+            <span className="td-display" style={sectionTitle}>People</span>
+          </div>
+          <div className="td-body" style={sectionNote}>
+            Accounts, and which roster person each one is. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in.
+          </div>
+        </>
+      )}
 
       {error && (
         <div className="td-body" style={{ ...sectionNote, color: COLOR.amber }}>{error}</div>
@@ -266,42 +319,109 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
       ) : members.length === 0 ? (
         <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint }}>Nobody has an account yet.</div>
       ) : (
-        // A table, because this is five facts about each of the same kind of
-        // thing and the eye wants to read down a column — "who has not been
-        // linked yet" is a glance, not a hunt through stacked cards.
-        <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4, maxWidth: 1280 }}>
-          <table style={{ width: '100%', minWidth: 830, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['Name', 'Position', 'Access', 'Email', 'Joined', 'Last login', 'Type', ''].map((h, i) => (
-                  <th
-                    key={h || `a${i}`}
-                    className="td-mono"
-                    style={{
-                      textAlign: i === 7 ? 'right' : 'left',
-                      fontSize: 9.5,
-                      fontWeight: 400,
-                      color: COLOR.textFaint,
-                      letterSpacing: '0.08em',
-                      padding: '9px 10px',
-                      borderBottom: `1px solid ${COLOR.line}`,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {h.toUpperCase()}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedMembers.map((m, rowIndex) => {
-                const isMe = m.user_id === me;
-                const tier = tierOf(m);
-                const lastAdmin = tier === 'admin' && admins.length === 1;
-                const position = positionFor(m);
-                const access = accessFor(m);
-                const lastLogin = lastLoginOf(m);
-                const cell = {
+        <>
+          {/* Search plus the two filters that actually come up: who's an
+              admin/staff/cast, and who still needs linking to the roster. */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: 260 }}>
+              <Search size={12} color={COLOR.textFaint} strokeWidth={1.75} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }} />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name or email…"
+                aria-label="Search people"
+                className="td-focusable"
+                style={{ width: '100%', background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12, padding: '6px 8px 6px 26px' }}
+              />
+            </div>
+            <select
+              className="td-focusable"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              aria-label="Filter by account type"
+              style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '6px 8px' }}
+            >
+              <option value="all">All types</option>
+              <option value="admin">Admin</option>
+              <option value="staff">Staff</option>
+              <option value="cast">Cast</option>
+            </select>
+            <select
+              className="td-focusable"
+              value={linkedFilter}
+              onChange={(e) => setLinkedFilter(e.target.value)}
+              aria-label="Filter by roster link"
+              style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 11.5, padding: '6px 8px' }}
+            >
+              <option value="all">Linked or not</option>
+              <option value="linked">Linked only</option>
+              <option value="unlinked">Not linked</option>
+            </select>
+            {(query || typeFilter !== 'all' || linkedFilter !== 'all') && (
+              <span className="td-mono" style={{ fontSize: 10.5, color: COLOR.textFaint }}>
+                {visibleMembers.length} of {members.length}
+              </span>
+            )}
+          </div>
+
+          {visibleMembers.length === 0 ? (
+            <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint }}>Nobody matches these filters.</div>
+          ) : (
+            // A table, because this is five facts about each of the same kind of
+            // thing and the eye wants to read down a column — "who has not been
+            // linked yet" is a glance, not a hunt through stacked cards.
+            <div style={{ overflowX: 'auto', border: `1px solid ${COLOR.line}`, borderRadius: 4, maxWidth: 1280 }}>
+              <table style={{ width: '100%', minWidth: 830, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {[
+                      ['Name', 'name'], ['Position', 'position'], ['Access', 'access'], ['Email', 'email'],
+                      ['Joined', 'joined'], ['Last login', 'lastLogin'], ['Type', 'type'], ['', null],
+                    ].map(([h, key], i) => (
+                      <th
+                        key={h || `a${i}`}
+                        className="td-mono"
+                        style={{
+                          textAlign: i === 7 ? 'right' : 'left',
+                          fontSize: 9.5,
+                          fontWeight: 400,
+                          color: COLOR.textFaint,
+                          letterSpacing: '0.08em',
+                          padding: '9px 10px',
+                          borderBottom: `1px solid ${COLOR.line}`,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {key ? (
+                          <button
+                            type="button"
+                            className="td-focusable"
+                            onClick={() => toggleSort(key)}
+                            aria-label={`Sort by ${h}`}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, color: sortKey === key ? COLOR.textMuted : COLOR.textFaint, font: 'inherit', letterSpacing: 'inherit' }}
+                          >
+                            {h.toUpperCase()}
+                            {sortKey === key ? (
+                              sortDir === 'asc' ? <ArrowUp size={10} strokeWidth={2} /> : <ArrowDown size={10} strokeWidth={2} />
+                            ) : (
+                              <ArrowUpDown size={10} strokeWidth={1.75} style={{ opacity: 0.5 }} />
+                            )}
+                          </button>
+                        ) : null}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleMembers.map((m, rowIndex) => {
+                    const isMe = m.user_id === me;
+                    const tier = tierOf(m);
+                    const lastAdmin = tier === 'admin' && admins.length === 1;
+                    const position = m._position;
+                    const access = m._access;
+                    const lastLogin = m._lastLogin;
+                    const cell = {
                   padding: '9px 10px',
                   borderTop: rowIndex === 0 ? 'none' : `1px solid ${COLOR.line}`,
                   verticalAlign: 'middle',
@@ -447,7 +567,9 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
               })}
             </tbody>
           </table>
-        </div>
+            </div>
+          )}
+        </>
       )}
 
       {members !== null && admins.length === 1 && (
@@ -459,6 +581,166 @@ export function MembersPanel({ orgId, roster, show, sectionTitle, sectionNote })
         <strong style={{ color: COLOR.textMuted }}>Admin</strong> {TIER_META.admin.note}{' '}
         <strong style={{ color: COLOR.textMuted }}>Staff</strong> {TIER_META.staff.note}{' '}
         <strong style={{ color: COLOR.textMuted }}>Cast</strong> {TIER_META.cast.note}
+      </div>
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// MY ACCOUNT — self-service password and email changes for whoever is signed
+// in right now, regardless of tier. Everyone gets one of these, admin or not,
+// so it lives outside the admin-only read-only treatment the rest of Settings
+// gets. There's a separate "Forgot password?" flow on the sign-in screen
+// (Auth.jsx) for someone who is locked out entirely — this one is for
+// somebody who can already get in and wants to change something.
+// ---------------------------------------------------------------------------
+export function MyAccountPanel({ sectionTitle, sectionNote, hideHeader = false }) {
+  const [email, setEmail] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
+  const [busy, setBusy] = useState(null); // null | 'password' | 'email'
+  const [passwordMsg, setPasswordMsg] = useState(null); // { text, tone }
+  const [emailMsg, setEmailMsg] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!cancelled) setEmail(data?.user?.email || '');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Both changes below re-check the current password first, via a real
+  // sign-in call, rather than trusting whatever session happens to be sitting
+  // open — the difference between "you can change your own password" and
+  // "anyone at your laptop while you're getting coffee can."
+  async function reauth(password) {
+    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) throw new Error('Current password is incorrect.');
+  }
+
+  async function changePassword(e) {
+    e.preventDefault();
+    setPasswordMsg(null);
+    if (newPassword.length < 6) {
+      setPasswordMsg({ text: 'New password needs to be at least 6 characters.', tone: 'error' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ text: 'Those two passwords don\u2019t match.', tone: 'error' });
+      return;
+    }
+    setBusy('password');
+    try {
+      await reauth(currentPassword);
+      const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+      if (err) throw err;
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordMsg({ text: 'Password updated.', tone: 'ok' });
+    } catch (err) {
+      setPasswordMsg({ text: err.message || 'Could not update the password.', tone: 'error' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function changeEmail(e) {
+    e.preventDefault();
+    setEmailMsg(null);
+    const next = newEmail.trim();
+    if (!next || next.toLowerCase() === email.toLowerCase()) {
+      setEmailMsg({ text: 'Enter a different email address.', tone: 'error' });
+      return;
+    }
+    setBusy('email');
+    try {
+      await reauth(emailPassword);
+      // Supabase sends a confirmation link before this actually takes effect
+      // — with "Secure email change" on, one to each address, so a stolen
+      // session alone can't quietly hijack the account by changing its email.
+      const { error: err } = await supabase.auth.updateUser({ email: next });
+      if (err) throw err;
+      setEmailPassword('');
+      setEmailMsg({ text: `Confirmation link sent to ${next} (and to ${email}, if your org has secure email change on). Nothing changes until you click it.`, tone: 'ok' });
+    } catch (err) {
+      setEmailMsg({ text: err.message || 'Could not start the email change.', tone: 'error' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const fieldStyle = { background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textPrimary, fontSize: 12.5, padding: '7px 9px', width: '100%', maxWidth: 280 };
+  const labelStyle = { fontSize: 10.5, color: COLOR.textFaint, letterSpacing: '0.04em', marginBottom: 3 };
+  const msgStyle = (tone) => ({ fontSize: 11.5, marginTop: 6, color: tone === 'error' ? '#C4553E' : COLOR.textMuted, maxWidth: 420, lineHeight: 1.4 });
+
+  return (
+    <div>
+      {!hideHeader && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <KeyRound size={14} color={COLOR.textMuted} strokeWidth={1.75} />
+            <span className="td-display" style={sectionTitle}>My account</span>
+          </div>
+          <div className="td-body" style={sectionNote}>
+            Your own sign-in — not gated by tier, because everyone needs to be able to get back into their own account.
+          </div>
+        </>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24, maxWidth: 900 }}>
+        <form onSubmit={changePassword}>
+          <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <KeyRound size={11} strokeWidth={1.75} /> CHANGE PASSWORD
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <div style={labelStyle}>Current password</div>
+              <input type="password" required autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} style={fieldStyle} />
+            </div>
+            <div>
+              <div style={labelStyle}>New password</div>
+              <input type="password" required minLength={6} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={fieldStyle} />
+            </div>
+            <div>
+              <div style={labelStyle}>Confirm new password</div>
+              <input type="password" required minLength={6} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={fieldStyle} />
+            </div>
+            <button type="submit" disabled={busy === 'password'} className="td-focusable" style={{ alignSelf: 'flex-start', background: COLOR.amber, border: 'none', borderRadius: 3, color: COLOR.void, fontSize: 12, fontWeight: 700, padding: '7px 14px', cursor: 'pointer', opacity: busy === 'password' ? 0.6 : 1 }}>
+              {busy === 'password' ? 'Updating…' : 'Update password'}
+            </button>
+            {passwordMsg && <div style={msgStyle(passwordMsg.tone)}>{passwordMsg.text}</div>}
+          </div>
+        </form>
+
+        <form onSubmit={changeEmail}>
+          <div className="td-mono" style={{ fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Mail size={11} strokeWidth={1.75} /> CHANGE EMAIL
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <div style={labelStyle}>Current email</div>
+              <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint, padding: '7px 0' }}>{email || '…'}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>New email</div>
+              <input type="email" required autoComplete="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} style={fieldStyle} />
+            </div>
+            <div>
+              <div style={labelStyle}>Current password, to confirm it's you</div>
+              <input type="password" required autoComplete="current-password" value={emailPassword} onChange={(e) => setEmailPassword(e.target.value)} style={fieldStyle} />
+            </div>
+            <button type="submit" disabled={busy === 'email'} className="td-focusable" style={{ alignSelf: 'flex-start', background: COLOR.amber, border: 'none', borderRadius: 3, color: COLOR.void, fontSize: 12, fontWeight: 700, padding: '7px 14px', cursor: 'pointer', opacity: busy === 'email' ? 0.6 : 1 }}>
+              {busy === 'email' ? 'Sending…' : 'Send confirmation'}
+            </button>
+            {emailMsg && <div style={msgStyle(emailMsg.tone)}>{emailMsg.text}</div>}
+          </div>
+        </form>
       </div>
     </div>
   );

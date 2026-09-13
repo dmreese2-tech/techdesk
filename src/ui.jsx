@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronRight } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,45 @@ export function StubPanel({ label, hint }) {
       >
         {guidance}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// COLLAPSIBLE SECTION — the header/chevron/note chrome shared by every
+// top-level block in Settings, so a page that used to be one long scroll can
+// be folded down to just the section names. Open/closed is the caller's
+// state (usually persisted to localStorage) — this component only draws it.
+//
+// A section whose own panel already draws a title — Positions, My account,
+// People — passes `hideHeader` to that panel so the title isn't drawn twice;
+// this component becomes the one and only header for it.
+// ---------------------------------------------------------------------------
+export function CollapsibleSection({ icon: Icon, title, note, open, onToggle, proseWidth = 720, children }) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="td-focusable"
+        aria-expanded={open}
+        style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+      >
+        <ChevronRight
+          size={13}
+          color={COLOR.textFaint}
+          strokeWidth={2.25}
+          style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}
+        />
+        {Icon && <Icon size={14} color={COLOR.textMuted} strokeWidth={1.75} style={{ flexShrink: 0 }} />}
+        <span className="td-display" style={{ fontSize: 13, color: COLOR.textMuted, letterSpacing: '0.05em' }}>{title}</span>
+      </button>
+      {note && (
+        <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint, marginTop: 5, marginBottom: open ? 14 : 0, maxWidth: proseWidth, marginLeft: 20 }}>
+          {note}
+        </div>
+      )}
+      {open && children}
     </div>
   );
 }

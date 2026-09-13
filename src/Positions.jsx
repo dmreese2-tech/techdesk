@@ -70,7 +70,7 @@ const POSITION_KINDS = [
 // one department until somebody says so.
 const DEFAULT_DEPT_FOR_KIND = { musician: 'band' };
 
-export function PositionsPanel({ positions, setPositions, departments = {}, departmentOrder = [], castEditor, children }) {
+export function PositionsPanel({ positions, setPositions, departments = {}, departmentOrder = [], castEditor, children, hideHeader = false }) {
   const [drafts, setDrafts] = useState({ crew: '', musician: '', staff: '' });
 
   // Always the normalised shape, whatever is actually stored, and always
@@ -102,12 +102,16 @@ export function PositionsPanel({ positions, setPositions, departments = {}, depa
 
   return (
     <div>
-      <div className="td-display" style={sectionTitle}>Positions</div>
-      <div className="td-body" style={sectionNote}>
-        The job titles you pick from when putting someone on a show, and the department each one belongs to. Keeping them
-        here means the same position reads the same way on every production, which is what makes the callboard and the
-        audio plot group correctly.
-      </div>
+      {!hideHeader && (
+        <>
+          <div className="td-display" style={sectionTitle}>Positions</div>
+          <div className="td-body" style={sectionNote}>
+            The job titles you pick from when putting someone on a show, and the department each one belongs to. Keeping them
+            here means the same position reads the same way on every production, which is what makes the callboard and the
+            audio plot group correctly.
+          </div>
+        </>
+      )}
 
       {/* As many cards per row as the window allows: two on a laptop, all four
           on a shop monitor. The cap is on the grid rather than the track, so a

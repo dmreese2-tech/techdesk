@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Check, Image as ImageIcon, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, X } from 'lucide-react';
+import { Briefcase, Building2, Check, Image as ImageIcon, KeyRound, Layers, MapPin, Pencil, Plus, RotateCcw, Star, Upload, Users, X } from 'lucide-react';
 import { COLOR } from './theme.jsx';
 import { supabase } from './supabaseClient.js';
-import { MembersPanel } from './Shell.jsx';
+import { MembersPanel, MyAccountPanel } from './Shell.jsx';
 import { PositionsPanel } from './Positions.jsx';
 import { PositionPermissionsPanel } from './PositionPermissions.jsx';
+import { CollapsibleSection } from './ui.jsx';
 import { byName, hasAddress, sortKeysByLabel, stockDepartments, venueAddressLine, venueList, venueMapsUrl } from './shared.jsx';
 
 // SETTINGS — venues, storage locations, positions, and the two taxonomies that
@@ -796,6 +797,31 @@ export function SettingsModule({
   const [inviteTier, setInviteTier] = useState('cast');
   const [rotating, setRotating] = useState(false);
 
+  // Which top-level sections are expanded. Remembered per browser, not per
+  // company or account — this is about how one person likes to scroll this
+  // page, not a setting anyone else should see or that should follow them to
+  // a different machine. Starts fully open, same as the page always has, so
+  // nothing changes for anyone until they collapse something themselves.
+  const OPEN_SECTIONS_KEY = 'techdesk_settings_open_sections_v1';
+  const [openSections, setOpenSections] = useState(() => {
+    const defaults = { company: true, departments: true, positions: true, account: true, people: true };
+    try {
+      const saved = JSON.parse(localStorage.getItem(OPEN_SECTIONS_KEY));
+      return saved && typeof saved === 'object' ? { ...defaults, ...saved } : defaults;
+    } catch {
+      return defaults;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify(openSections));
+    } catch {
+      // Private browsing or a full quota — the page still works, it just
+      // forgets what was collapsed the next time it loads.
+    }
+  }, [openSections]);
+  const toggleSection = (key) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
   async function rotateCode() {
     setRotating(true);
     const { data } = await supabase.rpc('rotate_invite_code', { check_org_id: orgId });
@@ -870,8 +896,14 @@ export function SettingsModule({
       {/* COMPANY — first, because the invite code is the thing you hand to a new
           person, and it used to be the last item on a long page. The logo lives
           here too: it is company identity, not a setting of its own. */}
-      <div>
-        {sectionHeader(Building2, 'Company', 'Who you are and how people get in.')}
+      <CollapsibleSection
+        icon={Building2}
+        title="Company"
+        note="Who you are and how people get in."
+        open={openSections.company}
+        onToggle={() => toggleSection('company')}
+        proseWidth={PROSE}
+      >
         {/* Tracks flex rather than sitting at a fixed max, so a narrow window
             packs three cards instead of stranding one; the cap is on the grid,
             which stops four cards stretching to 500px each on a shop monitor.
@@ -970,59 +1002,96 @@ export function SettingsModule({
             </div>
           </SettingCard>
         </div>
-
-      </div>
+      </CollapsibleSection>
 
       {/* DEPARTMENTS — no longer inside a "Categories & taxonomies" wrapper.
           That heading was a home for four lists that kept drifting apart; with
           departments as the spine it would be a category of one. */}
-      <div style={adminOnly}>
-        {sectionHeader(Layers, 'Departments', "One list, four jobs. A department decides who's on the roster, whether it calls cues, and whether it keeps stock.")}
-        <div style={{ maxWidth: 840 }}>
-        <DepartmentsEditor
-          map={DEPARTMENTS}
-          order={DEPARTMENT_ORDER}
-          setMap={setDEPARTMENTS}
-          setOrder={setDEPARTMENT_ORDER}
-          defaultIcon={Layers}
-        />
+      <CollapsibleSection
+        icon={Layers}
+        title="Departments"
+        note="One list, four jobs. A department decides who's on the roster, whether it calls cues, and whether it keeps stock."
+        open={openSections.departments}
+        onToggle={() => toggleSection('departments')}
+        proseWidth={PROSE}
+      >
+        <div style={{ ...adminOnly, maxWidth: 840 }}>
+          <DepartmentsEditor
+            map={DEPARTMENTS}
+            order={DEPARTMENT_ORDER}
+            setMap={setDEPARTMENTS}
+            setOrder={setDEPARTMENT_ORDER}
+            defaultIcon={Layers}
+          />
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* POSITIONS — a job title, the department it sits in, and what it may
           edit. The same subject three ways, so it is one panel. */}
-      <div style={adminOnly}>
-        <PositionsPanel
-          positions={positions}
-          setPositions={setPositions}
-          departments={DEPARTMENTS}
-          departmentOrder={DEPARTMENT_ORDER}
-          castEditor={
-            <TaxonomyEditor
-              bare
-              title="Cast positions"
-              map={CAST_TYPES}
-              order={CAST_TYPE_ORDER}
-              setMap={setCAST_TYPES}
-              setOrder={setCAST_TYPE_ORDER}
-              defaultIcon={Star}
-            />
-          }
-        >
-          <PositionPermissionsPanel
-            orgId={orgId}
+      <CollapsibleSection
+        icon={Briefcase}
+        title="Positions"
+        note="The job titles you pick from when putting someone on a show, and the department each one belongs to, plus what each one may edit."
+        open={openSections.positions}
+        onToggle={() => toggleSection('positions')}
+        proseWidth={PROSE}
+      >
+        <div style={adminOnly}>
+          <PositionsPanel
+            hideHeader
             positions={positions}
-            inventoryCategories={stockDepartments(DEPARTMENTS)}
+            setPositions={setPositions}
             departments={DEPARTMENTS}
-            sectionTitle={sectionTitle}
-            sectionNote={sectionNote}
-          />
-        </PositionsPanel>
-      </div>
+            departmentOrder={DEPARTMENT_ORDER}
+            castEditor={
+              <TaxonomyEditor
+                bare
+                title="Cast positions"
+                map={CAST_TYPES}
+                order={CAST_TYPE_ORDER}
+                setMap={setCAST_TYPES}
+                setOrder={setCAST_TYPE_ORDER}
+                defaultIcon={Star}
+              />
+            }
+          >
+            <PositionPermissionsPanel
+              orgId={orgId}
+              positions={positions}
+              inventoryCategories={stockDepartments(DEPARTMENTS)}
+              departments={DEPARTMENTS}
+              sectionTitle={sectionTitle}
+              sectionNote={sectionNote}
+            />
+          </PositionsPanel>
+        </div>
+      </CollapsibleSection>
+
+      {/* MY ACCOUNT — outside the read-only treatment too: your own
+          sign-in is not something admin status gates. */}
+      <CollapsibleSection
+        icon={KeyRound}
+        title="My account"
+        note="Your own sign-in — not gated by tier, because everyone needs to be able to get back into their own account."
+        open={openSections.account}
+        onToggle={() => toggleSection('account')}
+        proseWidth={PROSE}
+      >
+        <MyAccountPanel hideHeader sectionTitle={sectionTitle} sectionNote={sectionNote} />
+      </CollapsibleSection>
 
       {/* PEOPLE — outside the read-only treatment, because linking an account
           to a roster person is not admin-only. */}
-      <MembersPanel orgId={orgId} roster={roster} show={show} sectionTitle={sectionTitle} sectionNote={sectionNote} />
+      <CollapsibleSection
+        icon={Users}
+        title="People"
+        note="Accounts, and which roster person each one is. The rosters under Crew, Actors, Musicians and Staff are a different list — those are people you schedule, not people who sign in."
+        open={openSections.people}
+        onToggle={() => toggleSection('people')}
+        proseWidth={PROSE}
+      >
+        <MembersPanel hideHeader orgId={orgId} roster={roster} show={show} sectionTitle={sectionTitle} sectionNote={sectionNote} />
+      </CollapsibleSection>
     </div>
   );
 }
