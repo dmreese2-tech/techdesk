@@ -201,16 +201,56 @@ export function NewSoundEffectForm({ mixBuses, onAdd, onClose }) {
 // a physical output, into the L/R main mix, or into a matrix for further
 // blending downstream.
 // ---------------------------------------------------------------------------
+// A bus's matrix routing predates multi-matrix support and stored one
+// `matrixId`; reading it this way means old data keeps working without a
+// migration, while every save from here on writes the plural `matrixIds`.
+export function busMatrixIds(bus) {
+  if (Array.isArray(bus.matrixIds)) return bus.matrixIds;
+  return bus.matrixId ? [bus.matrixId] : [];
+}
+
+function describeMatrixList(ids, matrices) {
+  if (!ids.length) return 'Matrix (not set)';
+  const names = ids.map((id) => matrices.find((m) => m.id === id)).filter(Boolean).map((m) => `Matrix ${m.number}`);
+  return names.length ? names.join(', ') : 'Matrix (not set)';
+}
+
 export function describeBusDestination(bus, matrices) {
   if (bus.destination === 'lr') return 'L/R Main';
-  if (bus.destination === 'matrix') {
-    const m = matrices.find((x) => x.id === bus.matrixId);
-    return m ? `Matrix ${m.number} — ${m.name}` : 'Matrix (not set)';
-  }
+  if (bus.destination === 'matrix') return describeMatrixList(busMatrixIds(bus), matrices);
   return 'Direct Out';
 }
 
+export function describeLrMainDestination(lrMain, matrices) {
+  if (!lrMain || lrMain.destination !== 'matrix') return 'Direct Out';
+  return describeMatrixList(Array.isArray(lrMain.matrixIds) ? lrMain.matrixIds : [], matrices);
+}
+
+// Shared by the bus form/row and the L/R Main routing panel: a set of
+// checkboxes rather than a single select, since a bus (or L/R Main) can feed
+// more than one matrix at once.
+function MatrixChecklist({ selectedIds, matrices, active, onToggle }) {
+  if (matrices.length === 0) {
+    return <span className="td-mono" style={{ fontSize: 11, color: COLOR.textFaint }}>No matrices yet</span>;
+  }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', opacity: active ? 1 : 0.4, pointerEvents: active ? 'auto' : 'none' }}>
+      {matrices.map((m) => (
+        <label key={m.id} className="td-mono" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: COLOR.textPrimary, cursor: 'pointer' }}>
+          <input type="checkbox" checked={selectedIds.includes(m.id)} onChange={() => onToggle(m.id)} />
+          Matrix {m.number}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function BusDestinationFields({ draft, setDraft, matrices, inputStyle, labelStyle }) {
+  const selectedIds = busMatrixIds(draft);
+  function toggleMatrix(id) {
+    const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+    setDraft({ ...draft, matrixIds: next, matrixId: null });
+  }
   return (
     <>
       <div>
@@ -219,7 +259,7 @@ function BusDestinationFields({ draft, setDraft, matrices, inputStyle, labelStyl
           className="td-focusable"
           style={inputStyle}
           value={draft.destination}
-          onChange={(e) => setDraft({ ...draft, destination: e.target.value, matrixId: e.target.value === 'matrix' ? draft.matrixId : null })}
+          onChange={(e) => setDraft({ ...draft, destination: e.target.value, matrixIds: e.target.value === 'matrix' ? selectedIds : [], matrixId: null })}
         >
           <option value="direct">Direct Out</option>
           <option value="lr">L/R Main</option>
@@ -227,19 +267,8 @@ function BusDestinationFields({ draft, setDraft, matrices, inputStyle, labelStyl
         </select>
       </div>
       <div>
-        <label className="td-mono" style={labelStyle}>MATRIX</label>
-        <select
-          className="td-focusable"
-          style={{ ...inputStyle, opacity: draft.destination === 'matrix' ? 1 : 0.4 }}
-          value={draft.matrixId || ''}
-          disabled={draft.destination !== 'matrix'}
-          onChange={(e) => setDraft({ ...draft, matrixId: e.target.value || null })}
-        >
-          <option value="">{matrices.length ? 'Choose a matrix' : 'No matrices yet'}</option>
-          {matrices.map((m) => (
-            <option key={m.id} value={m.id}>Matrix {m.number} — {m.name}</option>
-          ))}
-        </select>
+        <label className="td-mono" style={labelStyle}>MATRIX{selectedIds.length > 1 ? 'ES' : ''}</label>
+        <MatrixChecklist selectedIds={selectedIds} matrices={matrices} active={draft.destination === 'matrix'} onToggle={toggleMatrix} />
       </div>
     </>
   );
@@ -301,7 +330,7 @@ export function MixBusRow({ bus, matrices, onSave, onRemove }) {
 export function NewMixBusForm({ nextNumber, matrices, onAdd, onClose }) {
   const [number, setNumber] = useState(nextNumber);
   const [name, setName] = useState('');
-  const [draft, setDraft] = useState({ destination: 'direct', matrixId: null });
+  const [draft, setDraft] = useState({ destination: 'direct', matrixIds: [] });
 
   const inputStyle = { background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '8px 10px', color: COLOR.textPrimary, fontSize: 13, width: '100%' };
   const labelStyle = { fontSize: 10, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 5, display: 'block' };
@@ -335,7 +364,7 @@ export function NewMixBusForm({ nextNumber, matrices, onAdd, onClose }) {
             number: Number(number) || nextNumber,
             name: name.trim(),
             destination: draft.destination,
-            matrixId: draft.destination === 'matrix' ? draft.matrixId : null,
+            matrixIds: draft.destination === 'matrix' ? busMatrixIds(draft) : [],
           })
         }
         style={{
@@ -412,6 +441,62 @@ export function MatrixRow({ matrix, onSave, onRemove }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// L/R MAIN ROUTING — the main mix has always come straight out through the
+// output patch. Now it can instead feed into one or more matrices, the same
+// as a bus, so it shows up here as its own single, always-present row rather
+// than a list the user adds to.
+// ---------------------------------------------------------------------------
+export function LrMainRoutingPanel({ lrMain, matrices, onChange }) {
+  const selectedIds = Array.isArray(lrMain.matrixIds) ? lrMain.matrixIds : [];
+  const labelStyle = { fontSize: 9, color: COLOR.textFaint, letterSpacing: '0.05em', marginBottom: 4, display: 'block' };
+  function toggleMatrix(id) {
+    const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+    onChange({ ...lrMain, matrixIds: next });
+  }
+  return (
+    <div style={{ display: 'flex', gap: 22, alignItems: 'flex-start', flexWrap: 'wrap', padding: '12px 14px', background: COLOR.card, border: `1px solid ${COLOR.line}`, borderRadius: 4 }}>
+      <div>
+        <label className="td-mono" style={labelStyle}>L/R MAIN ROUTES TO</label>
+        <select
+          className="td-focusable"
+          style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 9px', color: COLOR.textPrimary, fontSize: 12.5, minWidth: 140 }}
+          value={lrMain.destination === 'matrix' ? 'matrix' : 'direct'}
+          onChange={(e) => onChange({ ...lrMain, destination: e.target.value, matrixIds: e.target.value === 'matrix' ? selectedIds : [] })}
+        >
+          <option value="direct">Direct Out</option>
+          <option value="matrix">Matrix</option>
+        </select>
+      </div>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <label className="td-mono" style={labelStyle}>MATRIX{selectedIds.length > 1 ? 'ES' : ''}</label>
+        <MatrixChecklist selectedIds={selectedIds} matrices={matrices} active={lrMain.destination === 'matrix'} onToggle={toggleMatrix} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CHANNEL DESTINATION — every mic, DI and playback channel feeds either the
+// L/R Mix or one of the show's mix buses. Defaults to L/R Mix, same as an
+// analog board's default bus assign, until someone routes it elsewhere.
+// ---------------------------------------------------------------------------
+export function ChannelDestinationSelect({ value, mixBuses, onChange }) {
+  return (
+    <select
+      className="td-focusable"
+      style={{ background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '5px 8px', color: COLOR.textPrimary, fontSize: 11, width: 168, flexShrink: 0 }}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="lr">L/R Mix</option>
+      {mixBuses.map((b) => (
+        <option key={b.id} value={`bus:${b.id}`}>Bus {b.number} — {b.name}</option>
+      ))}
+    </select>
+  );
+}
+
 export function NewMatrixForm({ nextNumber, onAdd, onClose }) {
   const [number, setNumber] = useState(nextNumber);
   const [name, setName] = useState('');
@@ -470,7 +555,7 @@ export function sourceKeyFor(assignment) {
   return `${assignment.sourceType}:${assignment.sourceId}`;
 }
 
-export function OutputPortRow({ port, assignment, directBuses, matrices, duplicateCount, onChange }) {
+export function OutputPortRow({ port, assignment, directBuses, matrices, includeLr = true, duplicateCount, onChange }) {
   const inputStyle = { background: COLOR.void, border: `1px solid ${COLOR.line}`, borderRadius: 3, padding: '6px 9px', color: COLOR.textPrimary, fontSize: 12, width: '100%' };
   const value = sourceKeyFor(assignment);
 
@@ -485,8 +570,8 @@ export function OutputPortRow({ port, assignment, directBuses, matrices, duplica
         {matrices.map((m) => (
           <option key={`matrix-${m.id}`} value={`matrix:${m.id}`}>Matrix {m.number} — {m.name}</option>
         ))}
-        <option value="lr:L">L/R Main — Left</option>
-        <option value="lr:R">L/R Main — Right</option>
+        {includeLr && <option value="lr:L">L/R Main — Left</option>}
+        {includeLr && <option value="lr:R">L/R Main — Right</option>}
       </select>
       {duplicateCount > 1 && (
         <span className="td-mono" style={{ fontSize: 9.5, color: COLOR.amber, whiteSpace: 'nowrap' }} title="This source is also patched to another output port">
@@ -512,14 +597,29 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
 
   const mixBuses = useMemo(() => routing.filter((r) => r.kind === 'bus').sort((a, b) => a.number - b.number), [routing]);
   const matrices = useMemo(() => routing.filter((r) => r.kind === 'matrix').sort((a, b) => a.number - b.number), [routing]);
+  const lrMain = useMemo(() => routing.find((r) => r.kind === 'lrMain') || { id: 'lrMain', kind: 'lrMain', destination: 'direct', matrixIds: [] }, [routing]);
   const portAssignments = useMemo(() => {
     const map = {};
     routing.filter((r) => r.kind === 'port').forEach((r) => { map[r.portId] = r; });
     return map;
   }, [routing]);
+  const channelDestinations = useMemo(() => {
+    const map = {};
+    routing.filter((r) => r.kind === 'channelDest').forEach((r) => { map[r.routingKey] = r; });
+    return map;
+  }, [routing]);
+  function describeChannelDestination(routingKey) {
+    const entry = channelDestinations[routingKey];
+    if (!entry || entry.destination !== 'bus') return 'L/R Mix';
+    const bus = mixBuses.find((b) => b.id === entry.busId);
+    return bus ? `Bus ${bus.number} — ${bus.name}` : 'L/R Mix';
+  }
   // Only a Direct Out bus has its own physical output to patch — one routed
   // to L/R Main or a matrix is already feeding one of those instead.
   const directBuses = useMemo(() => mixBuses.filter((b) => b.destination === 'direct'), [mixBuses]);
+  // L/R Main only shows up as an output-patch source while it comes straight
+  // out — once it's routed into a matrix, that matrix's own output carries it.
+  const lrIsDirect = lrMain.destination !== 'matrix';
   // How many ports each source is currently patched to, so the same bus,
   // matrix or L/R channel wired to two outputs gets flagged rather than
   // silently allowed — printed gear can only physically come out of one.
@@ -557,10 +657,15 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
     updateRouting((r) => r.map((item) => (item.id === updated.id ? updated : item)));
   }
   function removeBus(id) {
-    // Clear the port this bus fed directly, and unassign it from any sound
-    // effect that was routed through it — a stale busId would silently point
-    // an effect at a bus that no longer exists.
-    updateRouting((r) => r.filter((item) => item.id !== id).filter((item) => !(item.kind === 'port' && item.sourceType === 'bus' && item.sourceId === id)));
+    // Clear the port this bus fed directly and any channel plot row routed to
+    // it, and unassign it from any sound effect that was routed through it —
+    // a stale busId would silently point at a bus that no longer exists.
+    updateRouting((r) =>
+      r
+        .filter((item) => item.id !== id)
+        .filter((item) => !(item.kind === 'port' && item.sourceType === 'bus' && item.sourceId === id))
+        .filter((item) => !(item.kind === 'channelDest' && item.destination === 'bus' && item.busId === id))
+    );
     setShows((prev) => prev.map((s) => (s.id === show.id ? { ...s, soundEffects: (s.soundEffects || []).map((e) => (e.busId === id ? { ...e, busId: null } : e)) } : s)));
   }
 
@@ -572,15 +677,50 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
     updateRouting((r) => r.map((item) => (item.id === updated.id ? updated : item)));
   }
   function removeMatrix(id) {
-    // A bus that fed this matrix falls back to Direct Out — silently pointing
-    // it at a matrix that no longer exists would drop its signal with no
-    // sign anything changed — and the port this matrix fed is cleared too.
+    // A bus (or L/R Main) that fed this matrix drops it from its list, falling
+    // back to Direct Out if that was its only matrix — silently pointing it
+    // at a matrix that no longer exists would drop its signal with no sign
+    // anything changed — and the port this matrix fed is cleared too.
     updateRouting((r) =>
       r
         .filter((item) => item.id !== id)
         .filter((item) => !(item.kind === 'port' && item.sourceType === 'matrix' && item.sourceId === id))
-        .map((item) => (item.kind === 'bus' && item.matrixId === id ? { ...item, destination: 'direct', matrixId: null } : item))
+        .map((item) => {
+          if (item.kind === 'bus' && item.destination === 'matrix') {
+            const ids = busMatrixIds(item).filter((x) => x !== id);
+            return ids.length ? { ...item, matrixIds: ids, matrixId: null } : { ...item, destination: 'direct', matrixIds: [], matrixId: null };
+          }
+          if (item.kind === 'lrMain' && item.destination === 'matrix') {
+            const ids = (item.matrixIds || []).filter((x) => x !== id);
+            return ids.length ? { ...item, matrixIds: ids } : { ...item, destination: 'direct', matrixIds: [] };
+          }
+          return item;
+        })
     );
+  }
+
+  function saveLrMain(updated) {
+    updateRouting((r) => {
+      const withoutLr = r.filter((item) => item.kind !== 'lrMain');
+      // Switching L/R Main into a matrix means it no longer comes straight
+      // out of a physical port, so any output patch pointed at it is stale.
+      const cleaned = updated.destination === 'matrix'
+        ? withoutLr.filter((item) => !(item.kind === 'port' && item.sourceType === 'lr'))
+        : withoutLr;
+      return [...cleaned, { id: 'lrMain', kind: 'lrMain', destination: updated.destination, matrixIds: updated.destination === 'matrix' ? (updated.matrixIds || []) : [] }];
+    });
+  }
+
+  function setChannelDestination(routingKey, value) {
+    updateRouting((r) => {
+      const without = r.filter((item) => !(item.kind === 'channelDest' && item.routingKey === routingKey));
+      if (!value || value === 'lr') {
+        if (!value) return without;
+        return [...without, { id: `chandest-${routingKey}`, kind: 'channelDest', routingKey, destination: 'lr', busId: null }];
+      }
+      const busId = value.slice(value.indexOf(':') + 1);
+      return [...without, { id: `chandest-${routingKey}`, kind: 'channelDest', routingKey, destination: 'bus', busId }];
+    });
   }
 
   function setPortSource(portId, value) {
@@ -604,9 +744,11 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
         <ExportCsvButton
           filename={`${show.title}-audio-plot`}
           rows={() => [
-            ...(plot.micChannels || []).map((r) => ({ Type: 'Mic', Channel: r.channel || '', Name: r.name || '', Role: r.role || '', Group: r.group || '' })),
-            ...(plot.diChannels || []).map((r) => ({ Type: 'DI', Channel: r.channel || '', Name: r.name || '', Role: r.role || '', Group: r.group || '' })),
+            ...(plot.micChannels || []).map((r) => ({ Type: 'Mic', Channel: r.channel || '', Name: r.name || '', Role: r.role || '', Group: describeChannelDestination(r.routingKey) })),
+            ...(plot.diChannels || []).map((r) => ({ Type: 'DI', Channel: r.channel || '', Name: r.name || '', Role: r.role || '', Group: describeChannelDestination(r.routingKey) })),
+            ...(plot.playbackChannels || []).map((r) => ({ Type: 'Playback', Channel: r.channel || '', Name: r.name || '', Role: r.detail || '', Group: describeChannelDestination(r.routingKey) })),
             ...(plot.monitorMixes || []).map((r) => ({ Type: 'Monitor mix', Channel: r.mix || r.channel || '', Name: r.name || '', Role: r.role || '', Group: r.group || '' })),
+            { Type: 'L/R Main', Channel: '', Name: 'L/R Main', Role: describeLrMainDestination(lrMain, matrices), Group: '' },
             ...mixBuses.map((b) => ({ Type: 'Mix bus', Channel: b.number, Name: b.name, Role: describeBusDestination(b, matrices), Group: '' })),
             ...matrices.map((m) => ({ Type: 'Matrix', Channel: m.number, Name: m.name, Role: '', Group: '' })),
             ...OUTPUT_PORTS.filter((p) => portAssignments[p.id]).map((p) => {
@@ -661,9 +803,18 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
       <AudioSectionHeader label="AUDIO CHANNEL PLOT" />
       {plot.all.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {plot.all.map((row) => (
-            <ChannelRow key={`${row.type}-${row.channel}`} row={row} />
-          ))}
+          {plot.all.map((row) => {
+            const dest = channelDestinations[row.routingKey];
+            const destValue = dest && dest.destination === 'bus' ? `bus:${dest.busId}` : 'lr';
+            return (
+              <div key={`${row.type}-${row.channel}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <ChannelRow row={row} />
+                </div>
+                <ChannelDestinationSelect value={destValue} mixBuses={mixBuses} onChange={(v) => setChannelDestination(row.routingKey, v)} />
+              </div>
+            );
+          })}
         </div>
       ) : (
         <StubPanel label="No channels assigned yet" hint="Channels are generated from cast and band assignments. Assign your actors and musicians to this show first, then set each one's mic, DI or playback channel." />
@@ -739,6 +890,9 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
         <StubPanel label="No matrices set up yet" hint="A matrix takes a blend of buses and the main mix and sends it somewhere of its own — a lobby feed, a recording split, a hearing-assist system. Add one here, then give a mix bus that destination above." />
       )}
 
+      <AudioSectionHeader label="L/R MAIN" />
+      <LrMainRoutingPanel lrMain={lrMain} matrices={matrices} onChange={saveLrMain} />
+
       <AudioSectionHeader label="OUTPUT PATCH" />
       <div className="td-body" style={{ fontSize: 11.5, color: COLOR.textFaint, marginBottom: 12, maxWidth: 640 }}>
         Where every Direct Out bus, matrix and L/R Main channel actually comes out — 8 ports on the board, 8 more on the stage box.
@@ -756,6 +910,7 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
                   assignment={assignment}
                   directBuses={directBuses}
                   matrices={matrices}
+                  includeLr={lrIsDirect}
                   duplicateCount={sourceUseCounts[sourceKeyFor(assignment)] || 0}
                   onChange={setPortSource}
                 />
@@ -775,6 +930,7 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
                   assignment={assignment}
                   directBuses={directBuses}
                   matrices={matrices}
+                  includeLr={lrIsDirect}
                   duplicateCount={sourceUseCounts[sourceKeyFor(assignment)] || 0}
                   onChange={setPortSource}
                 />
@@ -783,6 +939,11 @@ export function AudioModule({ show, actors, musicians, setShows, CAST_TYPE_ORDER
           </div>
         </div>
       </div>
+      {!lrIsDirect && (
+        <div className="td-body" style={{ fontSize: 11, color: COLOR.textFaint, marginTop: 8 }}>
+          L/R Main is routed into {describeLrMainDestination(lrMain, matrices)} above, so it no longer appears as its own output-patch source.
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 26, marginBottom: 10 }}>
         <div className="td-mono" style={{ fontSize: 11, color: COLOR.blueprint, letterSpacing: '0.1em' }}>SOUND EFFECTS</div>

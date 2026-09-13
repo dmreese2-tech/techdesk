@@ -1159,15 +1159,19 @@ export function buildAudioPlot(show, actors, musicians, CAST_TYPE_ORDER, MUSIC_S
   const monitorMixEntries = musicianEntries.filter(({ assignment }) => assignment.monitorMix);
 
   let ch = 1;
+  // routingKey is a stable identity for this channel's audio-bus routing
+  // (which mix bus, or L/R Mix, it feeds) — independent of the channel
+  // number above, which is just a position in this list and shifts as the
+  // roster changes.
   const micChannels = micedEntries.map(({ person, assignment }) => ({
-    channel: ch++, type: 'Mic', name: person.name, detail: assignment.roleTitle, subtype: assignment.micType || 'Wireless Lav',
+    channel: ch++, type: 'Mic', name: person.name, detail: assignment.roleTitle, subtype: assignment.micType || 'Wireless Lav', routingKey: `actor:${person.id}`,
   }));
   const diChannels = electricEntries.map(({ person, assignment }) => ({
-    channel: ch++, type: 'DI', name: person.name, detail: assignment.roleTitle, subtype: MUSIC_SECTIONS[assignment.category]?.label || 'Electric',
+    channel: ch++, type: 'DI', name: person.name, detail: assignment.roleTitle, subtype: MUSIC_SECTIONS[assignment.category]?.label || 'Electric', routingKey: `musician:${person.id}`,
   }));
   const playbackChannels = [
-    { channel: ch++, type: 'Playback', name: 'SFX Playback L', detail: 'Sound effects', subtype: 'Stereo' },
-    { channel: ch++, type: 'Playback', name: 'SFX Playback R', detail: 'Sound effects', subtype: 'Stereo' },
+    { channel: ch++, type: 'Playback', name: 'SFX Playback L', detail: 'Sound effects', subtype: 'Stereo', routingKey: 'playback:L' },
+    { channel: ch++, type: 'Playback', name: 'SFX Playback R', detail: 'Sound effects', subtype: 'Stereo', routingKey: 'playback:R' },
   ];
   const monitorMixes = monitorMixEntries.map(({ person, assignment }) => ({ id: person.id, name: person.name, roleTitle: assignment.roleTitle }));
 
