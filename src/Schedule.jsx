@@ -5,7 +5,7 @@ import { ExportCsvButton } from './csv.jsx';
 import { ImportCsvButton } from './csvImport.jsx';
 import { scheduleSpec } from './importSpecs.jsx';
 import {
-  MILESTONE_PRESETS, PERSON_TYPES, PERSON_TYPE_ORDER, ROLL_STATUS, ROLL_STATUS_ORDER, TODAY,
+  MILESTONE_PRESETS, PERSON_TYPES, PERSON_TYPE_ORDER, ROLL_STATUS, ROLL_STATUS_ORDER, TODAY, TODAY_STR,
   addMinutesToTime, assignmentFor, assignmentsFor, byName, emptyCalled,
   formatDuration, formatShortDate, formatTime12h, fromMinutes, hasAddress, isFullyCovered,
   milestoneSlotsFor, normalizeEntry, sceneById, slotCoverage,
@@ -79,6 +79,25 @@ const NAMES_BEFORE_FOLD = 12;
 
 function rosterFor(rosters, type) {
   return (rosters && rosters[type]) || [];
+}
+
+// Is this entry behind us?
+//
+// Compared as the 'YYYY-MM-DD' strings the schedule actually stores, which
+// sort the way dates do. The old test — `new Date(entry.date + 'T00:00:00') <
+// TODAY` — put a LOCAL midnight on one side and a UTC one on the other, and
+// only came out right by being west of Greenwich: east of it, today's own call
+// reads as past before anybody has arrived for it.
+//
+// A call is past on the DAY, not the hour. Today's strike stays on the board
+// all day, because the people looking at it are the people standing in the
+// room.
+// An entry with no date is NOT past. '' sorts before every real date, so the
+// naive comparison would quietly hide exactly the entry somebody needs to go
+// and fix.
+export function isPastEntry(entry) {
+  const date = String((entry && entry.date) || '');
+  return date !== '' && date < TODAY_STR;
 }
 
 // Everyone on this roster holding at least one assignment on this show.
@@ -1218,7 +1237,7 @@ export function ScheduleEntryCard({
   entry, show, rosters, venues, inventory, taxonomies, youAre, actingIds, actingName,
   canManage, canTakeRoll, onSignUp, onWithdraw, onSetRoll, onEdit, onRemove,
 }) {
-  const isPast = new Date(entry.date + 'T00:00:00') < TODAY;
+  const isPast = isPastEntry(entry);
   const breaksTotal = (entry.breaks || []).reduce((s, b) => s + (Number(b.durationMinutes) || 0), 0);
   const endTime = entry.time ? formatTime12h(addMinutesToTime(entry.time, (entry.durationMinutes || 0) + breaksTotal)) : '';
   const scenes = (entry.sceneIds || []).map((id) => sceneById(show, id)).filter(Boolean);
@@ -1352,7 +1371,7 @@ function MyCallsView({ show, rosters, venues, inventory, taxonomies, sorted, myP
     );
   }
 
-  const isPast = (entry) => new Date(entry.date + 'T00:00:00') < TODAY;
+  const isPast = isPastEntry;
   const mine = [];
   const signedUp = [];
   const open = [];
@@ -1517,6 +1536,12 @@ export function ScheduleModule({
   const [selectedId, setSelectedId] = useState(null);
   const [calendarDate, setCalendarDate] = useState(TODAY);
   const [actingId, setActingId] = useState('');
+  // The list opens on what is still to come. A production accumulates months
+  // of load-ins and rehearsals that nobody needs to scroll past to find
+  // Saturday, and the entries that have happened are records rather than
+  // notices. One click brings them back; the choice is per-visit and not
+  // remembered, because the useful default is the same every time.
+  const [showPast, setShowPast] = useState(false);
 
   // Read either shape. Entries written before the merge carry `attendance` and
   // legacy call slots; normalizeEntry is idempotent, so this is safe to run on
@@ -1617,6 +1642,15 @@ export function ScheduleModule({
   const monthLabel = calendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const selectedEntry = schedule.find((e) => e.id === selectedId);
   const mineView = view === 'mine';
+
+  // What the list shows. An entry being edited stays on screen whatever its
+  // date — hiding the form out from under somebody mid-edit, because they
+  // corrected the date to one in the past, would lose their typing.
+  const pastCount = useMemo(() => sorted.filter(isPastEntry).length, [sorted]);
+  const listEntries = useMemo(
+    () => (showPast ? sorted : sorted.filter((e) => !isPastEntry(e) || e.id === editingId)),
+    [sorted, showPast, editingId]
+  );
 
   const exportRows = () => {
     const rows = [];
@@ -1740,17 +1774,38 @@ export function ScheduleModule({
       ) : view === 'list' ? (
         sorted.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {sorted.map((entry) =>
-              editingId === entry.id ? (
-                <ScheduleEntryForm key={entry.id} {...formProps} initial={entry} onSave={saveEntry} onCancel={() => setEditingId(null)} />
-              ) : (
-                <ScheduleEntryCard
-                  key={entry.id}
-                  entry={entry}
-                  {...cardProps}
-                  onEdit={() => { setEditingId(entry.id); setAdding(false); }}
-                  onRemove={() => removeEntry(entry.id)}
-                />
+            {/* td-view-control, and it earns it: this writes to local render
+                state and nothing else. Choosing how far back to look is not
+                editing the schedule, and the people most likely to be reading
+                a long one are exactly the people without a grant on it. */}
+            {pastCount > 0 && (
+              <button
+                onClick={() => setShowPast((v) => !v)}
+                className="td-focusable td-view-control"
+                style={{ alignSelf: 'flex-start', background: 'transparent', border: `1px solid ${COLOR.line}`, borderRadius: 3, color: COLOR.textMuted, fontSize: 11.5, fontFamily: "'Inter', sans-serif", padding: '6px 12px', cursor: 'pointer' }}
+              >
+                {showPast ? 'Hide' : 'Show'} {pastCount} past {pastCount === 1 ? 'entry' : 'entries'}
+              </button>
+            )}
+
+            {listEntries.length === 0 ? (
+              <div className="td-body" style={{ fontSize: 12.5, color: COLOR.textFaint, lineHeight: 1.55, maxWidth: 640 }}>
+                Nothing ahead on {show.title} — every entry on the calendar has already happened. Show them above, or add
+                the next one top right.
+              </div>
+            ) : (
+              listEntries.map((entry) =>
+                editingId === entry.id ? (
+                  <ScheduleEntryForm key={entry.id} {...formProps} initial={entry} onSave={saveEntry} onCancel={() => setEditingId(null)} />
+                ) : (
+                  <ScheduleEntryCard
+                    key={entry.id}
+                    entry={entry}
+                    {...cardProps}
+                    onEdit={() => { setEditingId(entry.id); setAdding(false); }}
+                    onRemove={() => removeEntry(entry.id)}
+                  />
+                )
               )
             )}
           </div>
