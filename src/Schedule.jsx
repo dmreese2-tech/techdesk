@@ -8,7 +8,7 @@ import {
   MILESTONE_PRESETS, PERSON_TYPES, PERSON_TYPE_ORDER, ROLL_STATUS, ROLL_STATUS_ORDER, TODAY,
   addMinutesToTime, assignmentFor, assignmentsFor, byName, emptyCalled,
   formatDuration, formatShortDate, formatTime12h, fromMinutes, hasAddress, isFullyCovered,
-  milestoneSlotsFor, normalizeEntry, rosterForType, sceneById, slotCoverage,
+  milestoneSlotsFor, normalizeEntry, sceneById, slotCoverage,
   slotShortfall, venueAddressLine, venueByName, venueList, venueMapsUrl,
 } from './shared.jsx';
 import { StubPanel } from './ui.jsx';
@@ -563,10 +563,25 @@ function SlotEditor({ entry, rosters, show, slots, setSlots, slotOptions, label 
           // would refuse is a control that works for the stage manager and
           // fails for everyone else, which is worse than not offering it.
           // Somebody not on the show gets added on the People page first.
-          const roster = rosterForType(slot.personType, rosters);
           const taken = new Set((slot.signups || []).map((s) => s.personId));
           const gaps = shortfallSummary(entry, slot);
-          const freeOnShow = roster.filter((p) => assignmentFor(p, show.id) && !taken.has(p.id));
+          // Everyone on this production, not just the roster the position
+          // names. A cast member can now claim a Crew position herself, and a
+          // stage manager who could not put her in the same position from this
+          // form would be the stricter of the two — which is the drift this
+          // codebase keeps paying for. Matching roster first, so the ordinary
+          // case is still the top of the list; everyone else is labelled with
+          // the roster they came from so two Sarahs stay distinguishable.
+          const matchingKey = COLUMN_FOR_PERSON_TYPE[slot.personType];
+          const freeOnShow = CALLED_COLUMNS.slice()
+            .sort((a, b) => (a.type === matchingKey ? -1 : b.type === matchingKey ? 1 : 0))
+            .flatMap((col) =>
+              rosterFor(rosters, col.type)
+                .filter((p) => assignmentFor(p, show.id) && !taken.has(p.id))
+                .slice()
+                .sort((a, b) => byName(a.name, b.name))
+                .map((p) => ({ id: p.id, name: p.name, note: col.type === matchingKey ? '' : ` · ${col.label}` }))
+            );
           return (
             <div key={slot.id} style={{ border: `1px solid ${COLOR.line}`, borderRadius: 4, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 118px auto', gap: 8, alignItems: 'center' }}>
@@ -624,7 +639,7 @@ function SlotEditor({ entry, rosters, show, slots, setSlots, slotOptions, label 
               <select className="td-focusable" style={inputStyle} value="" onChange={(e) => addSignup(slot.id, e.target.value)} aria-label="Add someone to this position">
                 <option value="">Add someone…</option>
                 {freeOnShow.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.id} value={p.id}>{p.name}{p.note}</option>
                 ))}
               </select>
             </div>
@@ -1033,9 +1048,28 @@ function SignUpSheet({ entry, rosters, actingIds, actingName, canManage, canTake
           const meta = PERSON_TYPES[slot.personType] || PERSON_TYPES.crew;
           const TypeIcon = meta.icon;
           const columnKey = COLUMN_FOR_PERSON_TYPE[slot.personType];
-          // A sign-up has to come from the roster the position asks for: an
-          // actor cannot claim a Board Op slot with her cast record.
-          const myIdForSlot = [...actingIds].find((id) => rosterFor(rosters, columnKey).some((p) => p.id === id));
+          // A sign-up is a body, not a job title.
+          //
+          // This used to demand that the sign-up come from the roster the
+          // position names — an actor could not claim a Board Op slot with her
+          // cast record. Two things make that wrong in practice. The obvious
+          // one is the work: strike, load-in and paper tech run on cast members
+          // taking crew positions, and that is the whole reason the sheet is
+          // open. The quieter one is that `people(org_id, user_id)` is unique
+          // where user_id is not null, so an account is linked to exactly ONE
+          // roster record. A cast member therefore had no record on any roster
+          // but Cast, and since a position added in the entry form defaults to
+          // Crew, every open position rendered for her with no button and no
+          // reason given.
+          //
+          // So: anyone on the production may claim any open position. Prefer
+          // the record from the roster the position names, which is what an
+          // account linked twice should claim with; otherwise any record this
+          // account holds will do. The RPC (migration 25) enforces the same
+          // rule, so nothing appears here that the database will refuse.
+          const myIdForSlot =
+            [...actingIds].find((id) => rosterFor(rosters, columnKey).some((p) => p.id === id)) ||
+            [...actingIds].find((id) => findPerson(rosters, id));
           const mine = (slot.signups || []).find((s) => actingIds.has(s.personId));
 
           return (
